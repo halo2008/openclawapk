@@ -44,6 +44,8 @@ fun SettingsScreen(
     val authType by viewModel.authType.collectAsState()
     val authValue by viewModel.authValue.collectAsState()
     val ttsLanguage by viewModel.ttsLanguage.collectAsState()
+    val piperUrl by viewModel.piperUrl.collectAsState()
+    val kokoroUrl by viewModel.kokoroUrl.collectAsState()
 
     Scaffold(
         topBar = {
@@ -113,6 +115,28 @@ fun SettingsScreen(
             TtsLanguageDropdown(
                 selectedLanguage = ttsLanguage,
                 onLanguageSelected = viewModel::onTtsLanguageChanged
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = piperUrl,
+                onValueChange = viewModel::onPiperUrlChanged,
+                label = { Text(stringResource(R.string.settings_piper_url)) },
+                placeholder = { Text("https://piper.example.com") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = kokoroUrl,
+                onValueChange = viewModel::onKokoroUrlChanged,
+                label = { Text(stringResource(R.string.settings_kokoro_url)) },
+                placeholder = { Text("https://kokoro.example.com") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
             )
 
             Spacer(modifier = Modifier.height(24.dp))

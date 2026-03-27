@@ -2,6 +2,7 @@ package com.ksinfra.clawapk.websocket.adapter
 
 import com.ksinfra.clawapk.common.CoroutineDispatchers
 import com.ksinfra.clawapk.common.generateId
+import com.ksinfra.clawapk.domain.model.AudioData
 import com.ksinfra.clawapk.domain.model.AuthMode
 import com.ksinfra.clawapk.domain.model.ConnectionConfig
 import com.ksinfra.clawapk.domain.model.ConnectionState
@@ -94,11 +95,26 @@ class OkHttpOpenClawGateway(
     override suspend fun sendMessage(message: String): Result<String> {
         return sendRequest("agent", buildJsonObject {
             put("message", message)
+            put("idempotencyKey", generateId())
+            put("agentId", "main")
         })
     }
 
     override suspend fun listSessions(): Result<List<Session>> {
         return sendRequest("sessions.list", null).map { emptyList() }
+    }
+
+    override suspend fun ttsConvert(text: String): Result<AudioData> {
+        return sendRequest("tts.convert", buildJsonObject {
+            put("text", text)
+        }).mapCatching { responseJson ->
+            val element = json.parseToJsonElement(responseJson).jsonObject
+            val audioBase64 = element["audio"]?.jsonPrimitive?.content
+                ?: throw RuntimeException("No audio in TTS response")
+            val mimeType = element["mimeType"]?.jsonPrimitive?.content ?: "audio/wav"
+            val bytes = android.util.Base64.decode(audioBase64, android.util.Base64.DEFAULT)
+            AudioData(bytes = bytes, mimeType = mimeType)
+        }
     }
 
     private suspend fun sendRequest(method: String, params: JsonObject?): Result<String> {
@@ -332,11 +348,26 @@ class OkHttpOpenClawGateway(
 
     private fun handleEvent(frame: EventFrame) {
         val openClawEvent = when (frame.event) {
-            "agent" -> {
-                val text = frame.payload?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-                val sessionId = frame.payload?.jsonObject?.get("sessionId")?.jsonPrimitive?.content
-                OpenClawEvent.AgentResponse(text, sessionId)
+            "chat" -> {
+                val payload = frame.payload?.jsonObject
+                val state = payload?.get("state")?.jsonPrimitive?.content
+                if (state == "final") {
+                    val message = payload?.get("message")?.jsonObject
+                    val content = message?.get("content")?.jsonArray
+                    val text = content?.mapNotNull { block ->
+                        val blockObj = block.jsonObject
+                        if (blockObj["type"]?.jsonPrimitive?.content == "text") {
+                            blockObj["text"]?.jsonPrimitive?.content
+                        } else null
+                    }?.joinToString("\n") ?: ""
+                    val role = message?.get("role")?.jsonPrimitive?.content
+                    val sessionKey = payload?.get("sessionKey")?.jsonPrimitive?.content
+                    if (role == "assistant" && text.isNotBlank()) {
+                        OpenClawEvent.AgentResponse(text, sessionKey)
+                    } else null
+                } else null
             }
+            "agent" -> null // Skip streaming deltas, we use "chat" final instead
             "cron" -> {
                 val payload = frame.payload?.jsonObject
                 val actions = parseActions(payload?.get("actions"))

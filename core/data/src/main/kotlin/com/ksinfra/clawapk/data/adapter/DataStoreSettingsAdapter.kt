@@ -24,6 +24,8 @@ class DataStoreSettingsAdapter(
         val AUTH_TYPE = stringPreferencesKey("auth_type")
         val AUTH_VALUE = stringPreferencesKey("auth_value")
         val TTS_LANGUAGE = stringPreferencesKey("tts_language")
+        val PIPER_URL = stringPreferencesKey("piper_url")
+        val KOKORO_URL = stringPreferencesKey("kokoro_url")
     }
 
     override fun getConnectionConfig(): Flow<ConnectionConfig?> {
@@ -47,7 +49,9 @@ class DataStoreSettingsAdapter(
             ConnectionConfig(
                 serverUrl = url,
                 authMode = authMode,
-                ttsLanguage = language
+                ttsLanguage = language,
+                piperUrl = prefs[Keys.PIPER_URL] ?: "",
+                kokoroUrl = prefs[Keys.KOKORO_URL] ?: ""
             )
         }
     }
@@ -56,6 +60,8 @@ class DataStoreSettingsAdapter(
         context.dataStore.edit { prefs ->
             prefs[Keys.SERVER_URL] = config.serverUrl
             prefs[Keys.TTS_LANGUAGE] = config.ttsLanguage.name
+            prefs[Keys.PIPER_URL] = config.piperUrl
+            prefs[Keys.KOKORO_URL] = config.kokoroUrl
 
             when (val mode = config.authMode) {
                 is AuthMode.Token -> {

@@ -29,32 +29,26 @@ class SettingsViewModel(
     private val _ttsLanguage = MutableStateFlow("POLISH")
     val ttsLanguage: StateFlow<String> = _ttsLanguage.asStateFlow()
 
+    private val _piperUrl = MutableStateFlow("")
+    val piperUrl: StateFlow<String> = _piperUrl.asStateFlow()
+
+    private val _kokoroUrl = MutableStateFlow("")
+    val kokoroUrl: StateFlow<String> = _kokoroUrl.asStateFlow()
+
     init {
         loadSettings()
     }
 
-    fun onServerUrlChanged(url: String) {
-        _serverUrl.value = url
-    }
-
+    fun onServerUrlChanged(url: String) { _serverUrl.value = url }
     fun onAuthTypeChanged(type: String) {
         _authType.value = type
-        if (type == "none" || type == "device_pairing") {
-            _authValue.value = ""
-        }
+        if (type == "none" || type == "device_pairing") _authValue.value = ""
     }
-
-    fun onAuthValueChanged(value: String) {
-        _authValue.value = value
-    }
-
-    fun onCfCookieObtained(cookie: String) {
-        _authValue.value = cookie
-    }
-
-    fun onTtsLanguageChanged(language: String) {
-        _ttsLanguage.value = language
-    }
+    fun onAuthValueChanged(value: String) { _authValue.value = value }
+    fun onCfCookieObtained(cookie: String) { _authValue.value = cookie }
+    fun onTtsLanguageChanged(language: String) { _ttsLanguage.value = language }
+    fun onPiperUrlChanged(url: String) { _piperUrl.value = url }
+    fun onKokoroUrlChanged(url: String) { _kokoroUrl.value = url }
 
     fun onSave() {
         viewModelScope.launch {
@@ -70,23 +64,13 @@ class SettingsViewModel(
                 if (config != null) {
                     _serverUrl.value = config.serverUrl
                     _ttsLanguage.value = config.ttsLanguage.name
+                    _piperUrl.value = config.piperUrl
+                    _kokoroUrl.value = config.kokoroUrl
                     when (val mode = config.authMode) {
-                        is AuthMode.Token -> {
-                            _authType.value = "token"
-                            _authValue.value = mode.token
-                        }
-                        is AuthMode.Password -> {
-                            _authType.value = "password"
-                            _authValue.value = mode.password
-                        }
-                        is AuthMode.DeviceToken -> {
-                            _authType.value = "device_token"
-                            _authValue.value = mode.token
-                        }
-                        is AuthMode.CloudflareAccess -> {
-                            _authType.value = "cloudflare"
-                            _authValue.value = mode.cfCookie
-                        }
+                        is AuthMode.Token -> { _authType.value = "token"; _authValue.value = mode.token }
+                        is AuthMode.Password -> { _authType.value = "password"; _authValue.value = mode.password }
+                        is AuthMode.DeviceToken -> { _authType.value = "device_token"; _authValue.value = mode.token }
+                        is AuthMode.CloudflareAccess -> { _authType.value = "cloudflare"; _authValue.value = mode.cfCookie }
                         is AuthMode.DevicePairing -> _authType.value = "device_pairing"
                         is AuthMode.None -> _authType.value = "none"
                     }
@@ -106,7 +90,9 @@ class SettingsViewModel(
         return ConnectionConfig(
             serverUrl = _serverUrl.value,
             authMode = authMode,
-            ttsLanguage = Language.valueOf(_ttsLanguage.value)
+            ttsLanguage = Language.valueOf(_ttsLanguage.value),
+            piperUrl = _piperUrl.value,
+            kokoroUrl = _kokoroUrl.value
         )
     }
 }

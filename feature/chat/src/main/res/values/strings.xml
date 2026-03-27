@@ -32,5 +32,7 @@
     <string name="settings_tts_language">TTS language</string>
     <string name="settings_tts_polish">Polish (Piper)</string>
     <string name="settings_tts_english">English (Kokoro)</string>
+    <string name="settings_piper_url">Piper TTS URL (Polish)</string>
+    <string name="settings_kokoro_url">Kokoro TTS URL (English)</string>
     <string name="settings_save">Save and connect</string>
 </resources>
