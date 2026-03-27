@@ -6,12 +6,15 @@ import com.ksinfra.clawapk.domain.model.ConnectionState
 import com.ksinfra.clawapk.domain.model.Language
 import com.ksinfra.clawapk.domain.model.Message
 import com.ksinfra.clawapk.domain.model.MessageStatus
+import com.ksinfra.clawapk.domain.model.CronJobInfo
+import com.ksinfra.clawapk.domain.model.ModelInfo
+import com.ksinfra.clawapk.domain.model.OpenClawEvent
 import com.ksinfra.clawapk.domain.model.RecognitionState
 import com.ksinfra.clawapk.domain.model.Sender
+import com.ksinfra.clawapk.domain.port.OpenClawGateway
 import com.ksinfra.clawapk.domain.port.SettingsPort
 import com.ksinfra.clawapk.domain.port.SpeechToTextPort
 import com.ksinfra.clawapk.domain.usecase.ConnectToOpenClawUseCase
-import com.ksinfra.clawapk.domain.usecase.ObserveAgentResponsesUseCase
 import com.ksinfra.clawapk.domain.usecase.ObserveConnectionStateUseCase
 import com.ksinfra.clawapk.domain.usecase.SendMessageUseCase
 import com.ksinfra.clawapk.domain.usecase.SpeakResponseUseCase
@@ -26,7 +29,6 @@ import kotlinx.coroutines.launch
 
 class ChatViewModel(
     private val sendMessage: SendMessageUseCase,
-    private val observeAgentResponses: ObserveAgentResponsesUseCase,
     private val observeConnectionState: ObserveConnectionStateUseCase,
     private val speakResponse: SpeakResponseUseCase,
     private val startVoiceInput: StartVoiceInputUseCase,
@@ -34,6 +36,7 @@ class ChatViewModel(
     private val connectToOpenClaw: ConnectToOpenClawUseCase,
     private val settingsPort: SettingsPort,
     private val stt: SpeechToTextPort,
+    private val gateway: OpenClawGateway,
     private val ttsLanguage: Language
 ) : ViewModel() {
 
@@ -46,10 +49,38 @@ class ChatViewModel(
     private val _voiceOutputEnabled = MutableStateFlow(true)
     val voiceOutputEnabled: StateFlow<Boolean> = _voiceOutputEnabled.asStateFlow()
 
+    private val _availableModels = MutableStateFlow<List<ModelInfo>>(emptyList())
+    val availableModels: StateFlow<List<ModelInfo>> = _availableModels.asStateFlow()
+
+    private val _currentModel = MutableStateFlow("")
+    val currentModel: StateFlow<String> = _currentModel.asStateFlow()
+
+    private val _isStreaming = MutableStateFlow(false)
+    val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
+
+    private val _isThinking = MutableStateFlow(false)
+    val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
+
+    private val _cronJobs = MutableStateFlow<List<CronJobInfo>>(emptyList())
+    val cronJobs: StateFlow<List<CronJobInfo>> = _cronJobs.asStateFlow()
+
+    private val _ttft = MutableStateFlow<Long?>(null)
+    val ttft: StateFlow<Long?> = _ttft.asStateFlow()
+
+    private val _contextInfo = MutableStateFlow("")
+    val contextInfo: StateFlow<String> = _contextInfo.asStateFlow()
+
+    private var streamStartTime: Long = 0
+
+    // Track streaming message being built
+    private var streamingMessageId: String? = null
+    private var lastStreamRunId: String? = null
+
     init {
         autoConnect()
-        observeResponses()
+        observeAllEvents()
         observeVoiceInput()
+        loadOnConnect()
     }
 
     private fun autoConnect() {
@@ -65,8 +96,45 @@ class ChatViewModel(
         }
     }
 
+    private var hasLoadedInitialData = false
+
+    private fun loadOnConnect() {
+        viewModelScope.launch {
+            // Wait until we see Connected state
+            connectionState.collect { state ->
+                if (state is ConnectionState.Connected && !hasLoadedInitialData) {
+                    hasLoadedInitialData = true
+                    kotlinx.coroutines.delay(300)
+                    loadInitialData()
+                } else if (state is ConnectionState.Disconnected || state is ConnectionState.Error) {
+                    hasLoadedInitialData = false
+                }
+            }
+        }
+    }
+
+    private fun loadInitialData() {
+        viewModelScope.launch {
+            loadChatHistory()
+            loadModels()
+            loadCurrentModel()
+            onLoadCronJobs()
+        }
+    }
+
+    private fun loadCurrentModel() {
+        viewModelScope.launch {
+            gateway.getConfig("agents.defaults.model").onSuccess { value ->
+                if (value.isNotBlank()) _currentModel.value = value
+            }
+        }
+    }
+
     fun onSendMessage(text: String) {
         if (text.isBlank()) return
+        streamStartTime = System.currentTimeMillis()
+        _ttft.value = null
+        _isThinking.value = true
 
         val userMessage = Message(
             id = generateId(),
@@ -91,6 +159,31 @@ class ChatViewModel(
         }
     }
 
+    fun onClearChat() {
+        viewModelScope.launch {
+            gateway.resetSession()
+            _messages.value = emptyList()
+            streamingMessageId = null
+            lastStreamRunId = null
+        }
+    }
+
+    fun onLoadCronJobs() {
+        viewModelScope.launch {
+            gateway.listCronJobs().onSuccess { jobs ->
+                _cronJobs.value = jobs
+            }
+        }
+    }
+
+    fun onSelectModel(modelKey: String) {
+        viewModelScope.launch {
+            gateway.setDefaultModel(modelKey).onSuccess {
+                _currentModel.value = modelKey
+            }
+        }
+    }
+
     fun onToggleVoiceInput() {
         when (stt.recognitionState.value) {
             is RecognitionState.Listening -> stopVoiceInput()
@@ -102,21 +195,137 @@ class ChatViewModel(
         _voiceOutputEnabled.update { !it }
     }
 
-    private fun observeResponses() {
+    private fun loadChatHistory() {
         viewModelScope.launch {
-            observeAgentResponses().collect { response ->
-                val agentMessage = Message(
-                    id = generateId(),
-                    content = response.text,
-                    sender = Sender.AGENT
-                )
-                _messages.update { it + agentMessage }
-
-                if (_voiceOutputEnabled.value) {
-                    speakResponse(response.text, ttsLanguage)
+            gateway.getChatHistory().onSuccess { history ->
+                if (history.isNotEmpty() && _messages.value.isEmpty()) {
+                    val loaded = history.map { msg ->
+                        Message(
+                            id = generateId(),
+                            content = msg.content,
+                            sender = if (msg.role == "assistant") Sender.AGENT else Sender.USER,
+                            status = MessageStatus.SENT
+                        )
+                    }
+                    _messages.value = loaded
+                    _contextInfo.value = "${loaded.size} msgs"
                 }
             }
         }
+    }
+
+    private fun loadModels() {
+        viewModelScope.launch {
+            gateway.listModels().onSuccess { models ->
+                _availableModels.value = models
+            }
+        }
+    }
+
+    private fun observeAllEvents() {
+        viewModelScope.launch {
+            gateway.events.collect { event ->
+                when (event) {
+                    is OpenClawEvent.AgentStreaming -> handleStreaming(event)
+                    is OpenClawEvent.AgentStreamEnd -> handleStreamEnd(event)
+                    is OpenClawEvent.AgentResponse -> handleFinalResponse(event)
+                    is OpenClawEvent.AgentError -> handleError(event)
+                    else -> { /* cron, session, etc handled elsewhere */ }
+                }
+            }
+        }
+    }
+
+    private fun handleStreaming(event: OpenClawEvent.AgentStreaming) {
+        _isThinking.value = false
+        _isStreaming.value = true
+
+        // Measure TTFT
+        if (lastStreamRunId != event.runId && streamStartTime > 0) {
+            _ttft.value = System.currentTimeMillis() - streamStartTime
+        }
+
+        if (lastStreamRunId != event.runId) {
+            // New streaming message
+            lastStreamRunId = event.runId
+            val msgId = generateId()
+            streamingMessageId = msgId
+            _messages.update { it + Message(
+                id = msgId,
+                content = event.textDelta,
+                sender = Sender.AGENT,
+                status = MessageStatus.SENDING
+            )}
+        } else {
+            // Append to existing streaming message
+            val msgId = streamingMessageId ?: return
+            _messages.update { msgs ->
+                msgs.map { msg ->
+                    if (msg.id == msgId) msg.copy(content = event.textDelta)
+                    else msg
+                }
+            }
+        }
+    }
+
+    private fun handleStreamEnd(event: OpenClawEvent.AgentStreamEnd) {
+        _isStreaming.value = false
+        _isThinking.value = false
+        val msgId = streamingMessageId ?: return
+        _messages.update { msgs ->
+            msgs.map { msg ->
+                if (msg.id == msgId) msg.copy(status = MessageStatus.SENT)
+                else msg
+            }
+        }
+        streamingMessageId = null
+    }
+
+    private fun handleFinalResponse(event: OpenClawEvent.AgentResponse) {
+        _isStreaming.value = false
+        val msgId = streamingMessageId
+        if (msgId != null) {
+            // Replace streaming message with final text
+            _messages.update { msgs ->
+                msgs.map { msg ->
+                    if (msg.id == msgId) msg.copy(content = event.text, status = MessageStatus.SENT)
+                    else msg
+                }
+            }
+            streamingMessageId = null
+            lastStreamRunId = null
+        } else {
+            // No streaming was happening, add as new message
+            _messages.update { it + Message(
+                id = generateId(),
+                content = event.text,
+                sender = Sender.AGENT
+            )}
+        }
+
+        // Update context info
+        val msgCount = _messages.value.size
+        _contextInfo.value = "$msgCount messages"
+
+        if (_voiceOutputEnabled.value) {
+            viewModelScope.launch {
+                speakResponse(event.text, ttsLanguage)
+            }
+        }
+    }
+
+    private fun handleError(event: OpenClawEvent.AgentError) {
+        _isThinking.value = false
+        _isStreaming.value = false
+        streamingMessageId = null
+        lastStreamRunId = null
+
+        _messages.update { it + Message(
+            id = generateId(),
+            content = event.error,
+            sender = Sender.AGENT,
+            status = MessageStatus.ERROR
+        )}
     }
 
     private fun observeVoiceInput() {

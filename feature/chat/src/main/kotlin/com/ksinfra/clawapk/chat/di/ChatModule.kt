@@ -5,7 +5,6 @@ import com.ksinfra.clawapk.chat.viewmodel.SettingsViewModel
 import com.ksinfra.clawapk.domain.model.Language
 import com.ksinfra.clawapk.domain.usecase.ConnectToOpenClawUseCase
 import com.ksinfra.clawapk.domain.usecase.DisconnectFromOpenClawUseCase
-import com.ksinfra.clawapk.domain.usecase.ObserveAgentResponsesUseCase
 import com.ksinfra.clawapk.domain.usecase.ObserveConnectionStateUseCase
 import com.ksinfra.clawapk.domain.usecase.ObserveCronEventsUseCase
 import com.ksinfra.clawapk.domain.usecase.HandleCronEventUseCase
@@ -22,7 +21,6 @@ val chatModule = module {
     factory { DisconnectFromOpenClawUseCase(get()) }
     factory { ObserveConnectionStateUseCase(get()) }
     factory { SendMessageUseCase(get()) }
-    factory { ObserveAgentResponsesUseCase(get()) }
     factory { SpeakResponseUseCase(get(), get()) }
     factory { StartVoiceInputUseCase(get()) }
     factory { StopVoiceInputUseCase(get()) }
@@ -33,7 +31,6 @@ val chatModule = module {
     viewModel {
         ChatViewModel(
             sendMessage = get(),
-            observeAgentResponses = get(),
             observeConnectionState = get(),
             speakResponse = get(),
             startVoiceInput = get(),
@@ -41,6 +38,7 @@ val chatModule = module {
             connectToOpenClaw = get(),
             settingsPort = get(),
             stt = get(),
+            gateway = get(),
             ttsLanguage = Language.POLISH
         )
     }

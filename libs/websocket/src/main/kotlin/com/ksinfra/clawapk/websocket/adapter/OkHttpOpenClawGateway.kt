@@ -4,10 +4,13 @@ import com.ksinfra.clawapk.common.CoroutineDispatchers
 import com.ksinfra.clawapk.common.generateId
 import com.ksinfra.clawapk.domain.model.AudioData
 import com.ksinfra.clawapk.domain.model.AuthMode
+import com.ksinfra.clawapk.domain.model.ChatHistoryMessage
 import com.ksinfra.clawapk.domain.model.ConnectionConfig
 import com.ksinfra.clawapk.domain.model.ConnectionState
 import com.ksinfra.clawapk.domain.model.CronAction
 import com.ksinfra.clawapk.domain.model.CronEvent
+import com.ksinfra.clawapk.domain.model.CronJobInfo
+import com.ksinfra.clawapk.domain.model.ModelInfo
 import com.ksinfra.clawapk.domain.model.OpenClawEvent
 import com.ksinfra.clawapk.domain.model.Session
 import com.ksinfra.clawapk.domain.port.OpenClawGateway
@@ -81,6 +84,8 @@ class OkHttpOpenClawGateway(
         currentConfig = config
         shouldReconnect = true
         reconnectJob?.cancel()
+        webSocket?.close(1000, "Reconnecting")
+        webSocket = null
         doConnect(config)
     }
 
@@ -112,6 +117,98 @@ class OkHttpOpenClawGateway(
                 })
             })
         })
+    }
+
+    override suspend fun getChatHistory(): Result<List<ChatHistoryMessage>> {
+        return sendRequest("chat.history", buildJsonObject {
+            put("sessionKey", "agent:main:main")
+        }).mapCatching { responseJson ->
+            android.util.Log.d(TAG, "chat.history response: ${responseJson.take(500)}")
+            val element = json.parseToJsonElement(responseJson)
+            val messages = element.jsonObject["messages"]?.jsonArray
+                ?: element.jsonArray
+                ?: return@mapCatching emptyList()
+            messages.mapNotNull { msg ->
+                val obj = msg.jsonObject
+                val role = obj["role"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val content = obj["content"]?.jsonArray?.mapNotNull { block ->
+                    val blockObj = block.jsonObject
+                    if (blockObj["type"]?.jsonPrimitive?.content == "text") {
+                        blockObj["text"]?.jsonPrimitive?.content
+                    } else null
+                }?.joinToString("\n") ?: return@mapNotNull null
+                if (content.isBlank()) return@mapNotNull null
+                ChatHistoryMessage(role = role, content = content)
+            }
+        }
+    }
+
+    override suspend fun resetSession(): Result<String> {
+        return sendRequest("sessions.reset", buildJsonObject {
+            put("key", "agent:main:main")
+        })
+    }
+
+    override suspend fun listModels(): Result<List<ModelInfo>> {
+        return sendRequest("models.list", null).mapCatching { responseJson ->
+            android.util.Log.d(TAG, "models.list response: ${responseJson.take(500)}")
+            val element = json.parseToJsonElement(responseJson)
+            val models = element.jsonObject["models"]?.jsonArray
+                ?: element.jsonObject["data"]?.jsonArray
+                ?: return@mapCatching emptyList()
+            models.mapNotNull { model ->
+                val obj = model.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val name = obj["name"]?.jsonPrimitive?.content ?: id
+                val provider = obj["provider"]?.jsonPrimitive?.content ?: ""
+                val key = if (provider.isNotBlank()) "$provider/$id" else id
+                ModelInfo(key = key, name = name, provider = provider)
+            }
+        }
+    }
+
+    override suspend fun setDefaultModel(modelKey: String): Result<String> {
+        return sendRequest("config.patch", buildJsonObject {
+            put("patch", buildJsonObject {
+                put("agents", buildJsonObject {
+                    put("defaults", buildJsonObject {
+                        put("model", modelKey)
+                    })
+                })
+            })
+        })
+    }
+
+    override suspend fun getConfig(path: String): Result<String> {
+        return sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
+            val element = json.parseToJsonElement(responseJson).jsonObject
+            // Navigate the path like "agents.defaults.model"
+            var current: kotlinx.serialization.json.JsonElement = element
+            for (key in path.split(".")) {
+                current = (current as? JsonObject)?.get(key) ?: return@mapCatching ""
+            }
+            current.jsonPrimitive.content
+        }
+    }
+
+    override suspend fun listCronJobs(): Result<List<CronJobInfo>> {
+        return sendRequest("cron.list", null).mapCatching { responseJson ->
+            android.util.Log.d(TAG, "cron.list response: ${responseJson.take(500)}")
+            val element = json.parseToJsonElement(responseJson)
+            val jobs = element.jsonObject["jobs"]?.jsonArray
+                ?: element.jsonArray
+                ?: return@mapCatching emptyList()
+            jobs.mapNotNull { job ->
+                val obj = job.jsonObject
+                CronJobInfo(
+                    id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                    name = obj["name"]?.jsonPrimitive?.content ?: obj["id"]?.jsonPrimitive?.content ?: "",
+                    schedule = obj["schedule"]?.jsonPrimitive?.content ?: obj["cron"]?.jsonPrimitive?.content ?: "",
+                    enabled = obj["enabled"]?.jsonPrimitive?.content?.toBoolean() != false,
+                    lastRun = obj["lastRunAt"]?.jsonPrimitive?.content
+                )
+            }
+        }
     }
 
     override suspend fun ttsConvert(text: String): Result<AudioData> {
@@ -373,7 +470,30 @@ class OkHttpOpenClawGateway(
                     } else null
                 } else null
             }
-            "agent" -> null // Skip streaming deltas, we use "chat" final instead
+            "agent" -> {
+                val payload = frame.payload?.jsonObject
+                val stream = payload?.get("stream")?.jsonPrimitive?.content
+                val runId = payload?.get("runId")?.jsonPrimitive?.content ?: ""
+                when (stream) {
+                    "assistant" -> {
+                        val text = payload?.get("data")?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
+                        if (text.isNotBlank()) OpenClawEvent.AgentStreaming(runId, text) else null
+                    }
+                    "lifecycle" -> {
+                        val data = payload?.get("data")?.jsonObject
+                        val phase = data?.get("phase")?.jsonPrimitive?.content
+                        when (phase) {
+                            "end" -> OpenClawEvent.AgentStreamEnd(runId)
+                            "error" -> {
+                                val error = data?.get("error")?.jsonPrimitive?.content ?: "Unknown error"
+                                OpenClawEvent.AgentError(runId, error)
+                            }
+                            else -> null
+                        }
+                    }
+                    else -> null
+                }
+            }
             "cron" -> {
                 val payload = frame.payload?.jsonObject
                 val actions = parseActions(payload?.get("actions"))
