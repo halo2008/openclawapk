@@ -39,6 +39,7 @@ class DataStoreSettingsAdapter(
                 "token" -> AuthMode.Token(authValue)
                 "password" -> AuthMode.Password(authValue)
                 "device_token" -> AuthMode.DeviceToken(authValue)
+                "cloudflare" -> AuthMode.CloudflareAccess(authValue)
                 "device_pairing" -> AuthMode.DevicePairing
                 else -> AuthMode.None
             }
@@ -68,6 +69,10 @@ class DataStoreSettingsAdapter(
                 is AuthMode.DeviceToken -> {
                     prefs[Keys.AUTH_TYPE] = "device_token"
                     prefs[Keys.AUTH_VALUE] = mode.token
+                }
+                is AuthMode.CloudflareAccess -> {
+                    prefs[Keys.AUTH_TYPE] = "cloudflare"
+                    prefs[Keys.AUTH_VALUE] = mode.cfCookie
                 }
                 is AuthMode.DevicePairing -> {
                     prefs[Keys.AUTH_TYPE] = "device_pairing"

@@ -16,7 +16,13 @@
     <string name="settings_auth_none">None</string>
     <string name="settings_auth_token">Token</string>
     <string name="settings_auth_password">Password</string>
+    <string name="settings_auth_cloudflare">Cloudflare Access</string>
     <string name="settings_auth_device_pairing">Device pairing</string>
+    <string name="settings_cf_authenticated">Logged in via Cloudflare</string>
+    <string name="settings_cf_login">Log in via Cloudflare</string>
+
+    <!-- Cloudflare auth screen -->
+    <string name="cf_auth_title">Cloudflare Login</string>
     <string name="settings_auth_value_token">Token</string>
     <string name="settings_auth_value_password">Password</string>
     <string name="settings_tts_language">TTS language</string>

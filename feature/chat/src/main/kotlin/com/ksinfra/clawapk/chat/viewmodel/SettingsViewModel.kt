@@ -48,6 +48,10 @@ class SettingsViewModel(
         _authValue.value = value
     }
 
+    fun onCfCookieObtained(cookie: String) {
+        _authValue.value = cookie
+    }
+
     fun onTtsLanguageChanged(language: String) {
         _ttsLanguage.value = language
     }
@@ -79,6 +83,10 @@ class SettingsViewModel(
                             _authType.value = "device_token"
                             _authValue.value = mode.token
                         }
+                        is AuthMode.CloudflareAccess -> {
+                            _authType.value = "cloudflare"
+                            _authValue.value = mode.cfCookie
+                        }
                         is AuthMode.DevicePairing -> _authType.value = "device_pairing"
                         is AuthMode.None -> _authType.value = "none"
                     }
@@ -91,6 +99,7 @@ class SettingsViewModel(
         val authMode = when (_authType.value) {
             "token" -> AuthMode.Token(_authValue.value)
             "password" -> AuthMode.Password(_authValue.value)
+            "cloudflare" -> AuthMode.CloudflareAccess(_authValue.value)
             "device_pairing" -> AuthMode.DevicePairing
             else -> AuthMode.None
         }

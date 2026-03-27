@@ -134,9 +134,16 @@ class OkHttpOpenClawGateway(
             .replace("http://", "ws://")
             .let { if (!it.startsWith("ws")) "wss://$it" else it }
 
-        val request = Request.Builder()
-            .url(wsUrl)
-            .build()
+        val requestBuilder = Request.Builder().url(wsUrl)
+
+        if (config.authMode is AuthMode.CloudflareAccess) {
+            val cookie = (config.authMode as AuthMode.CloudflareAccess).cfCookie
+            if (cookie.isNotBlank()) {
+                requestBuilder.addHeader("Cookie", "CF_Authorization=$cookie")
+            }
+        }
+
+        val request = requestBuilder.build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -167,8 +174,14 @@ class OkHttpOpenClawGateway(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                _connectionState.value = ConnectionState.Error(t.message ?: "Connection failed")
-                if (shouldReconnect) {
+                val code = response?.code
+                val errorMsg = when (code) {
+                    403 -> "Auth expired (Cloudflare 403)"
+                    401 -> "Unauthorized (401)"
+                    else -> t.message ?: "Connection failed"
+                }
+                _connectionState.value = ConnectionState.Error(errorMsg)
+                if (shouldReconnect && code != 403) {
                     scheduleReconnect()
                 }
             }
@@ -233,6 +246,7 @@ class OkHttpOpenClawGateway(
             is AuthMode.Token -> AuthParams(token = mode.token)
             is AuthMode.Password -> AuthParams(password = mode.password)
             is AuthMode.DeviceToken -> AuthParams(deviceToken = mode.token)
+            is AuthMode.CloudflareAccess -> null
             is AuthMode.DevicePairing -> AuthParams()
             is AuthMode.None -> null
         }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -36,7 +37,8 @@ import com.ksinfra.clawapk.chat.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToCfAuth: () -> Unit = {}
 ) {
     val serverUrl by viewModel.serverUrl.collectAsState()
     val authType by viewModel.authType.collectAsState()
@@ -77,7 +79,20 @@ fun SettingsScreen(
                 onTypeSelected = viewModel::onAuthTypeChanged
             )
 
-            if (authType != "none" && authType != "device_pairing") {
+            if (authType == "cloudflare") {
+                Spacer(modifier = Modifier.height(8.dp))
+                val cfStatus = if (authValue.isNotBlank())
+                    stringResource(R.string.settings_cf_authenticated)
+                else
+                    stringResource(R.string.settings_cf_login)
+
+                OutlinedButton(
+                    onClick = { onNavigateToCfAuth() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(cfStatus)
+                }
+            } else if (authType != "none" && authType != "device_pairing") {
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = authValue,
@@ -120,6 +135,7 @@ private fun AuthTypeDropdown(
 ) {
     val options = listOf(
         "none" to stringResource(R.string.settings_auth_none),
+        "cloudflare" to stringResource(R.string.settings_auth_cloudflare),
         "token" to stringResource(R.string.settings_auth_token),
         "password" to stringResource(R.string.settings_auth_password),
         "device_pairing" to stringResource(R.string.settings_auth_device_pairing)

@@ -110,12 +110,35 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 1. Launch **ClawAPK**.
 2. Tap the **Settings** ⚙️ icon.
 3. Enter your OpenClaw server (e.g., `wss://claw.example.com`).
-4. Select **Auth Mode**: `None`, `Token`, `Password`, or `Device Pairing`.
+4. Select **Auth Mode**: `None`, `Token`, `Password`, `Device Pairing`, or `Cloudflare Access`.
 5. Choose **TTS Engine** (Polish/Piper or English/Kokoro).
 6. Tap **Save and Connect**.
 
+### 🔒 Cloudflare Access Authentication
+
+If your OpenClaw instance is protected by [Cloudflare Zero Trust Access](https://developers.cloudflare.com/cloudflare-one/), ClawAPK supports native authentication through an embedded WebView login flow:
+
+1. In **Settings**, select **Cloudflare Access** as the auth mode.
+2. Enter your server address (e.g., `wss://claw.ks-infra.dev`).
+3. Tap **"Log in via Cloudflare"** — a WebView opens with Cloudflare's login page.
+4. Authenticate using your email (or any identity provider configured in Cloudflare).
+5. Once authenticated, the app captures the `CF_Authorization` cookie and returns to Settings showing **"Logged in via Cloudflare"**.
+6. Tap **Save and Connect** — the cookie is sent with the WebSocket handshake, and Cloudflare forwards the connection to OpenClaw.
+
+**How it works under the hood:**
+
+```
+Phone → wss://claw.example.com
+     → Cloudflare CDN (verifies CF_Authorization cookie)
+     → Cloudflare Tunnel (encrypted)
+     → localhost:18789 (OpenClaw gateway, trusted-proxy mode)
+```
+
+> [!NOTE]
+> Cloudflare Access sessions expire based on your configured **Session Duration** (default: 24 hours). When the session expires, the app will show an "Auth expired (Cloudflare 403)" error — simply go to Settings and tap "Log in via Cloudflare" again to re-authenticate.
+
 > [!TIP]
-> Use **Device Pairing** for the most secure and easiest setup without typing long tokens!
+> To avoid frequent re-logins, increase the session duration in **Cloudflare Dashboard → Zero Trust → Access → Applications → Your App → Session Duration** (up to 30 days).
 
 ---
 
