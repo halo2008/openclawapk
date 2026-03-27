@@ -1,0 +1,26 @@
+<resources>
+    <!-- Chat screen -->
+    <string name="chat_title">ClawAPK</string>
+    <string name="chat_message_placeholder">Type a message…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_voice_input">Voice input</string>
+    <string name="chat_toggle_voice_output">Toggle voice output</string>
+    <string name="chat_settings">Settings</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_back">Back</string>
+    <string name="settings_server_url">Server address</string>
+    <string name="settings_server_url_hint">wss://claw.example.com</string>
+    <string name="settings_auth_type">Authorization</string>
+    <string name="settings_auth_none">None</string>
+    <string name="settings_auth_token">Token</string>
+    <string name="settings_auth_password">Password</string>
+    <string name="settings_auth_device_pairing">Device pairing</string>
+    <string name="settings_auth_value_token">Token</string>
+    <string name="settings_auth_value_password">Password</string>
+    <string name="settings_tts_language">TTS language</string>
+    <string name="settings_tts_polish">Polish (Piper)</string>
+    <string name="settings_tts_english">English (Kokoro)</string>
+    <string name="settings_save">Save and connect</string>
+</resources>

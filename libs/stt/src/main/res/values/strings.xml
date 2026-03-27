@@ -1,0 +1,7 @@
+<resources>
+    <string name="stt_unavailable">Speech recognition not available</string>
+    <string name="stt_no_match">No speech detected</string>
+    <string name="stt_network_error">Network error</string>
+    <string name="stt_audio_error">Audio error</string>
+    <string name="stt_error">Recognition error: %d</string>
+</resources>

@@ -1,0 +1,26 @@
+<resources>
+    <!-- Ekran czatu -->
+    <string name="chat_title">ClawAPK</string>
+    <string name="chat_message_placeholder">Napisz wiadomosc…</string>
+    <string name="chat_send">Wyslij</string>
+    <string name="chat_voice_input">Wejscie glosowe</string>
+    <string name="chat_toggle_voice_output">Przelacz wyjscie glosowe</string>
+    <string name="chat_settings">Ustawienia</string>
+
+    <!-- Ekran ustawien -->
+    <string name="settings_title">Ustawienia</string>
+    <string name="settings_back">Wstecz</string>
+    <string name="settings_server_url">Adres serwera</string>
+    <string name="settings_server_url_hint">wss://claw.example.com</string>
+    <string name="settings_auth_type">Autoryzacja</string>
+    <string name="settings_auth_none">Brak</string>
+    <string name="settings_auth_token">Token</string>
+    <string name="settings_auth_password">Haslo</string>
+    <string name="settings_auth_device_pairing">Parowanie urzadzenia</string>
+    <string name="settings_auth_value_token">Token</string>
+    <string name="settings_auth_value_password">Haslo</string>
+    <string name="settings_tts_language">Jezyk TTS</string>
+    <string name="settings_tts_polish">Polski (Piper)</string>
+    <string name="settings_tts_english">Angielski (Kokoro)</string>
+    <string name="settings_save">Zapisz i polacz</string>
+</resources>

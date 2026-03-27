@@ -1,0 +1,35 @@
+# Build outputs
+*.iml
+.gradle/
+build/
+**/build/
+
+# Local properties
+local.properties
+
+# IDE
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+/.idea/deploymentTargetSelector.xml
+/.idea/other.xml
+/.idea/render.experimental.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Native
+.externalNativeBuild/
+.cxx/
+captures/
+
+# Keystore
+*.jks
+*.keystore
+
+# Signing config
+signing.properties

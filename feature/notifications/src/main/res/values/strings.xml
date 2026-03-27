@@ -1,0 +1,8 @@
+<resources>
+    <string name="notification_channel_messages">Messages</string>
+    <string name="notification_channel_cron">Cron events</string>
+    <string name="notification_channel_service">Listener service</string>
+    <string name="notification_cron_prefix">Cron: %s</string>
+    <string name="notification_service_title">ClawAPK</string>
+    <string name="notification_service_text">Listening for OpenClaw events…</string>
+</resources>

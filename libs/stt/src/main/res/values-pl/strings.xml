@@ -1,0 +1,7 @@
+<resources>
+    <string name="stt_unavailable">Rozpoznawanie mowy niedostepne</string>
+    <string name="stt_no_match">Nie wykryto mowy</string>
+    <string name="stt_network_error">Blad sieci</string>
+    <string name="stt_audio_error">Blad audio</string>
+    <string name="stt_error">Blad rozpoznawania: %d</string>
+</resources>

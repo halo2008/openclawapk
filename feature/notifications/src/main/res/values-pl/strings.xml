@@ -1,0 +1,8 @@
+<resources>
+    <string name="notification_channel_messages">Wiadomosci</string>
+    <string name="notification_channel_cron">Zdarzenia cron</string>
+    <string name="notification_channel_service">Usluga nasluchu</string>
+    <string name="notification_cron_prefix">Cron: %s</string>
+    <string name="notification_service_title">ClawAPK</string>
+    <string name="notification_service_text">Nasluchuje zdarzen OpenClaw…</string>
+</resources>
