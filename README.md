@@ -93,7 +93,7 @@ graph TD
 ### Prerequisites
 
 - ✅ Android Studio Ladybug or newer
-- ✅ JDK 11+
+- ✅ JDK 17+
 - ✅ Running [OpenClaw](https://github.com/openclaw/openclaw) instance
 
 ### Build & Install
