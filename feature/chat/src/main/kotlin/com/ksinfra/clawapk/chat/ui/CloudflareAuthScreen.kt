@@ -39,10 +39,9 @@ fun CloudflareAuthScreen(
 ) {
     var isLoading by remember { mutableStateOf(true) }
 
-    val httpsUrl = serverUrl
-        .replace("wss://", "https://")
-        .replace("ws://", "http://")
-        .let { if (!it.startsWith("http")) "https://$it" else it }
+    val httpsUrl = serverUrl.trim()
+        .let { it.replace(Regex("^\\w+://"), "") }
+        .let { "https://$it" }
 
     Scaffold(
         topBar = {

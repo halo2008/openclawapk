@@ -48,7 +48,8 @@ val chatModule = module {
     viewModel {
         SettingsViewModel(
             settingsPort = get(),
-            connectToOpenClaw = get()
+            connectToOpenClaw = get(),
+            gateway = get()
         )
     }
 }

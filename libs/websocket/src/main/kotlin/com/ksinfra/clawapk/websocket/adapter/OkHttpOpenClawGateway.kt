@@ -57,7 +57,7 @@ class OkHttpOpenClawGateway(
     }
 
     private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
@@ -104,6 +104,16 @@ class OkHttpOpenClawGateway(
         return sendRequest("sessions.list", null).map { emptyList() }
     }
 
+    override suspend fun setTtsProvider(provider: String): Result<String> {
+        return sendRequest("config.patch", buildJsonObject {
+            put("patch", buildJsonObject {
+                put("talk", buildJsonObject {
+                    put("provider", provider)
+                })
+            })
+        })
+    }
+
     override suspend fun ttsConvert(text: String): Result<AudioData> {
         return sendRequest("talk.speak", buildJsonObject {
             put("text", text)
@@ -145,10 +155,9 @@ class OkHttpOpenClawGateway(
         connectSent = false
         android.util.Log.d(TAG, "Connecting to: ${config.serverUrl} auth=${config.authMode::class.simpleName}")
 
-        val wsUrl = config.serverUrl
-            .replace("https://", "wss://")
-            .replace("http://", "ws://")
-            .let { if (!it.startsWith("ws")) "wss://$it" else it }
+        val wsUrl = config.serverUrl.trim()
+            .let { it.replace(Regex("^\\w+://"), "") }  // strip any scheme
+            .let { "wss://$it" }                         // always use wss
 
         val requestBuilder = Request.Builder().url(wsUrl)
 
@@ -240,8 +249,6 @@ class OkHttpOpenClawGateway(
         if (connectSent) return
         connectSent = true
 
-        val keys = deviceIdentity.getOrCreateKeys()
-        val signedAt = System.currentTimeMillis()
         val role = "operator"
         val scopes = listOf("operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing")
         val clientInfo = ClientInfo(
@@ -252,33 +259,7 @@ class OkHttpOpenClawGateway(
             mode = "ui"
         )
 
-        // Build sign payload matching OpenClaw's _e() function
-        val authToken = when (val mode = config.authMode) {
-            is AuthMode.Token -> mode.token
-            else -> null
-        }
-
-        val signPayload = buildSignPayload(
-            deviceId = keys.deviceId,
-            clientId = clientInfo.id,
-            clientMode = clientInfo.mode,
-            role = role,
-            scopes = scopes,
-            signedAtMs = signedAt,
-            token = authToken,
-            nonce = nonce
-        )
-
-        android.util.Log.d(TAG, "Sign payload: $signPayload")
-        val signature = deviceIdentity.sign(signPayload)
-        android.util.Log.d(TAG, "Signature: $signature")
-
-        val authParams = when (val mode = config.authMode) {
-            is AuthMode.Token -> AuthParams(token = mode.token)
-            is AuthMode.Password -> AuthParams(password = mode.password)
-            is AuthMode.DeviceToken -> AuthParams(deviceToken = mode.token)
-            else -> null
-        }
+        val useDevicePairing = config.authMode is AuthMode.DevicePairing || config.authMode is AuthMode.None
 
         val connectParams = buildJsonObject {
             put("minProtocol", 3)
@@ -292,14 +273,39 @@ class OkHttpOpenClawGateway(
             })
             put("role", role)
             put("scopes", kotlinx.serialization.json.JsonArray(scopes.map { kotlinx.serialization.json.JsonPrimitive(it) }))
-            put("device", buildJsonObject {
-                put("id", keys.deviceId)
-                put("publicKey", keys.publicKey)
-                put("signature", signature)
-                put("signedAt", signedAt)
-                put("nonce", nonce)
-            })
+
+            if (useDevicePairing) {
+                val keys = deviceIdentity.getOrCreateKeys()
+                val signedAt = System.currentTimeMillis()
+                val signPayload = buildSignPayload(
+                    deviceId = keys.deviceId,
+                    clientId = clientInfo.id,
+                    clientMode = clientInfo.mode,
+                    role = role,
+                    scopes = scopes,
+                    signedAtMs = signedAt,
+                    token = null,
+                    nonce = nonce
+                )
+                val signature = deviceIdentity.sign(signPayload)
+                android.util.Log.d(TAG, "Sending connect with device=${keys.deviceId}")
+                put("device", buildJsonObject {
+                    put("id", keys.deviceId)
+                    put("publicKey", keys.publicKey)
+                    put("signature", signature)
+                    put("signedAt", signedAt)
+                    put("nonce", nonce)
+                })
+            }
+
             put("caps", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("tool-events"))))
+
+            val authParams = when (val mode = config.authMode) {
+                is AuthMode.Token -> AuthParams(token = mode.token)
+                is AuthMode.Password -> AuthParams(password = mode.password)
+                is AuthMode.DeviceToken -> AuthParams(deviceToken = mode.token)
+                else -> null
+            }
             if (authParams != null) {
                 put("auth", buildJsonObject {
                     authParams.token?.let { put("token", it) }
@@ -317,7 +323,7 @@ class OkHttpOpenClawGateway(
         }
 
         val frameJson = frame.toString()
-        android.util.Log.d(TAG, "Sending connect with device=${keys.deviceId}")
+        android.util.Log.d(TAG, "Sending connect auth=${config.authMode::class.simpleName} devicePairing=$useDevicePairing")
         ws.send(frameJson)
     }
 
@@ -380,7 +386,7 @@ class OkHttpOpenClawGateway(
                     )
                 )
             }
-            "tick" -> OpenClawEvent.Tick(System.currentTimeMillis())
+            "tick" -> null // Server heartbeat — ignored to avoid unnecessary processing
             "shutdown" -> OpenClawEvent.Shutdown
             "session.message", "sessions.changed" -> {
                 val sessionId = frame.payload?.jsonObject?.get("sessionId")?.jsonPrimitive?.content ?: ""

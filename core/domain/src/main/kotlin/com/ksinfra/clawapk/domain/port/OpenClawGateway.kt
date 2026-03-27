@@ -17,4 +17,5 @@ interface OpenClawGateway {
     suspend fun sendMessage(message: String): Result<String>
     suspend fun listSessions(): Result<List<Session>>
     suspend fun ttsConvert(text: String): Result<AudioData>
+    suspend fun setTtsProvider(provider: String): Result<String>
 }

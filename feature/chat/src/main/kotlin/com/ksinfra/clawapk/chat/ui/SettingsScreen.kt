@@ -112,31 +112,9 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            TtsLanguageDropdown(
-                selectedLanguage = ttsLanguage,
-                onLanguageSelected = viewModel::onTtsLanguageChanged
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = piperUrl,
-                onValueChange = viewModel::onPiperUrlChanged,
-                label = { Text(stringResource(R.string.settings_piper_url)) },
-                placeholder = { Text("https://piper.example.com") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = kokoroUrl,
-                onValueChange = viewModel::onKokoroUrlChanged,
-                label = { Text(stringResource(R.string.settings_kokoro_url)) },
-                placeholder = { Text("https://kokoro.example.com") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+            TtsVoiceDropdown(
+                selectedVoice = ttsLanguage,
+                onVoiceSelected = viewModel::onTtsLanguageChanged
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -199,13 +177,13 @@ private fun AuthTypeDropdown(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TtsLanguageDropdown(
-    selectedLanguage: String,
-    onLanguageSelected: (String) -> Unit
+private fun TtsVoiceDropdown(
+    selectedVoice: String,
+    onVoiceSelected: (String) -> Unit
 ) {
     val options = listOf(
-        "POLISH" to stringResource(R.string.settings_tts_polish),
-        "ENGLISH" to stringResource(R.string.settings_tts_english)
+        "ENGLISH" to "Kokoro - English (af_heart)",
+        "POLISH" to "Microsoft - Polski (Zofia)"
     )
     var expanded by remember { mutableStateOf(false) }
 
@@ -214,7 +192,7 @@ private fun TtsLanguageDropdown(
         onExpandedChange = { expanded = it }
     ) {
         OutlinedTextField(
-            value = options.find { it.first == selectedLanguage }?.second ?: stringResource(R.string.settings_tts_polish),
+            value = options.find { it.first == selectedVoice }?.second ?: options[0].second,
             onValueChange = {},
             readOnly = true,
             label = { Text(stringResource(R.string.settings_tts_language)) },
@@ -231,7 +209,7 @@ private fun TtsLanguageDropdown(
                 DropdownMenuItem(
                     text = { Text(label) },
                     onClick = {
-                        onLanguageSelected(value)
+                        onVoiceSelected(value)
                         expanded = false
                     }
                 )
