@@ -122,12 +122,27 @@ private fun ConnectionIndicator(state: ConnectionState) {
         is ConnectionState.Disconnected -> MaterialTheme.colorScheme.outline
         is ConnectionState.Error -> MaterialTheme.colorScheme.error
     }
-    Box(
-        modifier = Modifier
-            .size(8.dp)
-            .clip(CircleShape)
-            .background(color)
-    )
+    val label = when (state) {
+        is ConnectionState.Connected -> stringResource(R.string.connection_connected)
+        is ConnectionState.Connecting -> stringResource(R.string.connection_connecting)
+        is ConnectionState.Reconnecting -> stringResource(R.string.connection_reconnecting)
+        is ConnectionState.Disconnected -> stringResource(R.string.connection_disconnected)
+        is ConnectionState.Error -> state.reason
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color
+        )
+    }
 }
 
 @Composable

@@ -6,6 +6,10 @@
     <string name="chat_voice_input">Wejscie glosowe</string>
     <string name="chat_toggle_voice_output">Przelacz wyjscie glosowe</string>
     <string name="chat_settings">Ustawienia</string>
+    <string name="connection_connected">Polaczono</string>
+    <string name="connection_connecting">Laczenie…</string>
+    <string name="connection_reconnecting">Ponowne laczenie…</string>
+    <string name="connection_disconnected">Rozlaczono</string>
 
     <!-- Ekran ustawien -->
     <string name="settings_title">Ustawienia</string>

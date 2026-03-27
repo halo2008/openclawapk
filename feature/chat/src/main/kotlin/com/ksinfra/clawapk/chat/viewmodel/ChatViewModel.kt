@@ -8,7 +8,9 @@ import com.ksinfra.clawapk.domain.model.Message
 import com.ksinfra.clawapk.domain.model.MessageStatus
 import com.ksinfra.clawapk.domain.model.RecognitionState
 import com.ksinfra.clawapk.domain.model.Sender
+import com.ksinfra.clawapk.domain.port.SettingsPort
 import com.ksinfra.clawapk.domain.port.SpeechToTextPort
+import com.ksinfra.clawapk.domain.usecase.ConnectToOpenClawUseCase
 import com.ksinfra.clawapk.domain.usecase.ObserveAgentResponsesUseCase
 import com.ksinfra.clawapk.domain.usecase.ObserveConnectionStateUseCase
 import com.ksinfra.clawapk.domain.usecase.SendMessageUseCase
@@ -29,6 +31,8 @@ class ChatViewModel(
     private val speakResponse: SpeakResponseUseCase,
     private val startVoiceInput: StartVoiceInputUseCase,
     private val stopVoiceInput: StopVoiceInputUseCase,
+    private val connectToOpenClaw: ConnectToOpenClawUseCase,
+    private val settingsPort: SettingsPort,
     private val stt: SpeechToTextPort,
     private val ttsLanguage: Language
 ) : ViewModel() {
@@ -43,8 +47,22 @@ class ChatViewModel(
     val voiceOutputEnabled: StateFlow<Boolean> = _voiceOutputEnabled.asStateFlow()
 
     init {
+        autoConnect()
         observeResponses()
         observeVoiceInput()
+    }
+
+    private fun autoConnect() {
+        viewModelScope.launch {
+            settingsPort.getConnectionConfig().collect { config ->
+                if (config != null && config.serverUrl.isNotBlank()) {
+                    val currentState = connectionState.value
+                    if (currentState is ConnectionState.Disconnected || currentState is ConnectionState.Error) {
+                        connectToOpenClaw(config)
+                    }
+                }
+            }
+        }
     }
 
     fun onSendMessage(text: String) {

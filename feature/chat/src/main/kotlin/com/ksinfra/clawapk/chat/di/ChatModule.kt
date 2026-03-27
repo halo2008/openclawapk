@@ -38,6 +38,8 @@ val chatModule = module {
             speakResponse = get(),
             startVoiceInput = get(),
             stopVoiceInput = get(),
+            connectToOpenClaw = get(),
+            settingsPort = get(),
             stt = get(),
             ttsLanguage = Language.POLISH
         )

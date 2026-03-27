@@ -46,7 +46,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class OkHttpOpenClawGateway(
-    dispatchers: CoroutineDispatchers
+    dispatchers: CoroutineDispatchers,
+    private val deviceIdentity: DeviceIdentity
 ) : OpenClawGateway {
 
     private val json = Json {
@@ -72,6 +73,8 @@ class OkHttpOpenClawGateway(
     private var currentConfig: ConnectionConfig? = null
     private var reconnectJob: Job? = null
     private var shouldReconnect = false
+    private var connectNonce: String? = null
+    private var connectSent = false
 
     override suspend fun connect(config: ConnectionConfig) {
         currentConfig = config
@@ -95,10 +98,7 @@ class OkHttpOpenClawGateway(
     }
 
     override suspend fun listSessions(): Result<List<Session>> {
-        return sendRequest("sessions.list", null).map { responseText ->
-            // Parse sessions from response - simplified
-            emptyList()
-        }
+        return sendRequest("sessions.list", null).map { emptyList() }
     }
 
     private suspend fun sendRequest(method: String, params: JsonObject?): Result<String> {
@@ -108,17 +108,14 @@ class OkHttpOpenClawGateway(
         val deferred = CompletableDeferred<ResponseFrame>()
         pendingRequests[id] = deferred
 
-        val frameJson = json.encodeToString(RequestFrame.serializer(), frame)
-        ws.send(frameJson)
+        ws.send(json.encodeToString(RequestFrame.serializer(), frame))
 
         return try {
             val response = deferred.await()
             if (response.ok) {
                 Result.success(response.payload?.toString() ?: "")
             } else {
-                Result.failure(
-                    RuntimeException(response.error?.message ?: "Unknown error")
-                )
+                Result.failure(RuntimeException(response.error?.message ?: "Unknown error"))
             }
         } catch (e: Exception) {
             pendingRequests.remove(id)
@@ -128,6 +125,9 @@ class OkHttpOpenClawGateway(
 
     private fun doConnect(config: ConnectionConfig) {
         _connectionState.value = ConnectionState.Connecting
+        connectNonce = null
+        connectSent = false
+        android.util.Log.d(TAG, "Connecting to: ${config.serverUrl} auth=${config.authMode::class.simpleName}")
 
         val wsUrl = config.serverUrl
             .replace("https://", "wss://")
@@ -147,19 +147,12 @@ class OkHttpOpenClawGateway(
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                val connectParams = buildConnectParams(config)
-                val paramsJson = json.encodeToString(ConnectParams.serializer(), connectParams)
-
-                val handshakeFrame = RequestFrame(
-                    id = generateId(),
-                    method = "connect",
-                    params = json.parseToJsonElement(paramsJson)
-                )
-                webSocket.send(json.encodeToString(RequestFrame.serializer(), handshakeFrame))
+                android.util.Log.d(TAG, "WebSocket opened, waiting for challenge...")
+                // Don't send connect yet - wait for connect.challenge event
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                handleMessage(text)
+                handleMessage(text, webSocket, config)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -167,6 +160,7 @@ class OkHttpOpenClawGateway(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                android.util.Log.d(TAG, "WebSocket closed: code=$code reason=$reason")
                 _connectionState.value = ConnectionState.Disconnected
                 if (shouldReconnect) {
                     scheduleReconnect()
@@ -180,6 +174,7 @@ class OkHttpOpenClawGateway(
                     401 -> "Unauthorized (401)"
                     else -> t.message ?: "Connection failed"
                 }
+                android.util.Log.e(TAG, "WebSocket failure: $errorMsg code=$code", t)
                 _connectionState.value = ConnectionState.Error(errorMsg)
                 if (shouldReconnect && code != 403) {
                     scheduleReconnect()
@@ -188,24 +183,151 @@ class OkHttpOpenClawGateway(
         })
     }
 
-    private fun handleMessage(text: String) {
+    private fun handleMessage(text: String, ws: WebSocket, config: ConnectionConfig) {
+        android.util.Log.d(TAG, "MSG: ${text.take(200)}")
         val element = json.parseToJsonElement(text).jsonObject
         val type = element["type"]?.jsonPrimitive?.content
 
         when (type) {
             "hello-ok" -> {
                 val connId = element["server"]?.jsonObject?.get("connId")?.jsonPrimitive?.content ?: ""
+                android.util.Log.d(TAG, "Connected! connId=$connId")
                 _connectionState.value = ConnectionState.Connected(connId)
-            }
-            "res" -> {
-                val response = json.decodeFromString(ResponseFrame.serializer(), text)
-                pendingRequests.remove(response.id)?.complete(response)
             }
             "event" -> {
                 val event = json.decodeFromString(EventFrame.serializer(), text)
-                handleEvent(event)
+                if (event.event == "connect.challenge") {
+                    val nonce = event.payload?.jsonObject?.get("nonce")?.jsonPrimitive?.content ?: ""
+                    android.util.Log.d(TAG, "Got challenge nonce=$nonce")
+                    connectNonce = nonce
+                    sendConnect(ws, config, nonce)
+                } else {
+                    handleEvent(event)
+                }
+            }
+            "res" -> {
+                val response = json.decodeFromString(ResponseFrame.serializer(), text)
+                val payloadType = response.payload?.jsonObject?.get("type")?.jsonPrimitive?.content
+                if (response.ok && payloadType == "hello-ok") {
+                    val connId = response.payload?.jsonObject?.get("server")?.jsonObject?.get("connId")?.jsonPrimitive?.content ?: ""
+                    android.util.Log.d(TAG, "Connected! connId=$connId")
+                    _connectionState.value = ConnectionState.Connected(connId)
+                } else if (!response.ok && response.error != null) {
+                    android.util.Log.e(TAG, "Response error: ${response.error.message}")
+                }
+                pendingRequests.remove(response.id)?.complete(response)
             }
         }
+    }
+
+    private fun sendConnect(ws: WebSocket, config: ConnectionConfig, nonce: String) {
+        if (connectSent) return
+        connectSent = true
+
+        val keys = deviceIdentity.getOrCreateKeys()
+        val signedAt = System.currentTimeMillis()
+        val role = "operator"
+        val scopes = listOf("operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing")
+        val clientInfo = ClientInfo(
+            id = "openclaw-android",
+            displayName = "ClawAPK",
+            version = "1.0.0",
+            platform = "android",
+            mode = "ui"
+        )
+
+        // Build sign payload matching OpenClaw's _e() function
+        val authToken = when (val mode = config.authMode) {
+            is AuthMode.Token -> mode.token
+            else -> null
+        }
+
+        val signPayload = buildSignPayload(
+            deviceId = keys.deviceId,
+            clientId = clientInfo.id,
+            clientMode = clientInfo.mode,
+            role = role,
+            scopes = scopes,
+            signedAtMs = signedAt,
+            token = authToken,
+            nonce = nonce
+        )
+
+        android.util.Log.d(TAG, "Sign payload: $signPayload")
+        val signature = deviceIdentity.sign(signPayload)
+        android.util.Log.d(TAG, "Signature: $signature")
+
+        val authParams = when (val mode = config.authMode) {
+            is AuthMode.Token -> AuthParams(token = mode.token)
+            is AuthMode.Password -> AuthParams(password = mode.password)
+            is AuthMode.DeviceToken -> AuthParams(deviceToken = mode.token)
+            else -> null
+        }
+
+        val connectParams = buildJsonObject {
+            put("minProtocol", 3)
+            put("maxProtocol", 3)
+            put("client", buildJsonObject {
+                put("id", clientInfo.id)
+                put("displayName", clientInfo.displayName)
+                put("version", clientInfo.version)
+                put("platform", clientInfo.platform)
+                put("mode", clientInfo.mode)
+            })
+            put("role", role)
+            put("scopes", kotlinx.serialization.json.JsonArray(scopes.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            put("device", buildJsonObject {
+                put("id", keys.deviceId)
+                put("publicKey", keys.publicKey)
+                put("signature", signature)
+                put("signedAt", signedAt)
+                put("nonce", nonce)
+            })
+            put("caps", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("tool-events"))))
+            if (authParams != null) {
+                put("auth", buildJsonObject {
+                    authParams.token?.let { put("token", it) }
+                    authParams.password?.let { put("password", it) }
+                    authParams.deviceToken?.let { put("deviceToken", it) }
+                })
+            }
+        }
+
+        val frame = buildJsonObject {
+            put("type", "req")
+            put("id", generateId())
+            put("method", "connect")
+            put("params", connectParams)
+        }
+
+        val frameJson = frame.toString()
+        android.util.Log.d(TAG, "Sending connect with device=${keys.deviceId}")
+        ws.send(frameJson)
+    }
+
+    private fun buildSignPayload(
+        deviceId: String,
+        clientId: String,
+        clientMode: String,
+        role: String,
+        scopes: List<String>,
+        signedAtMs: Long,
+        token: String?,
+        nonce: String
+    ): String {
+        // Must match OpenClaw's _e() function:
+        // [v2, deviceId, clientId, clientMode, role, scopes.join(","), signedAtMs, token??"", nonce].join("|")
+        return listOf(
+            "v2",
+            deviceId,
+            clientId,
+            clientMode,
+            role,
+            scopes.joinToString(","),
+            signedAtMs.toString(),
+            token ?: "",
+            nonce
+        ).joinToString("|")
     }
 
     private fun handleEvent(frame: EventFrame) {
@@ -241,42 +363,22 @@ class OkHttpOpenClawGateway(
         }
     }
 
-    private fun buildConnectParams(config: ConnectionConfig): ConnectParams {
-        val authParams = when (val mode = config.authMode) {
-            is AuthMode.Token -> AuthParams(token = mode.token)
-            is AuthMode.Password -> AuthParams(password = mode.password)
-            is AuthMode.DeviceToken -> AuthParams(deviceToken = mode.token)
-            is AuthMode.CloudflareAccess -> null
-            is AuthMode.DevicePairing -> AuthParams()
-            is AuthMode.None -> null
-        }
-
-        return ConnectParams(
-            client = ClientInfo(),
-            auth = authParams
-        )
-    }
-
     private fun parseActions(element: JsonElement?): Set<CronAction> {
         if (element == null) return setOf(CronAction.NOTIFY, CronAction.SPEAK, CronAction.VIBRATE)
 
         return try {
-            val array = element.jsonArray
-            array.mapNotNull { item ->
+            element.jsonArray.mapNotNull { item ->
                 when (item.jsonPrimitive.content.lowercase()) {
                     "notify" -> CronAction.NOTIFY
                     "speak" -> CronAction.SPEAK
                     "sound", "play_sound" -> CronAction.PLAY_SOUND
                     "vibrate" -> CronAction.VIBRATE
-                    "all" -> null // handled below
                     else -> null
                 }
             }.toSet().ifEmpty {
-                // If "all" was in the list or array was empty
                 setOf(CronAction.NOTIFY, CronAction.SPEAK, CronAction.VIBRATE)
             }
         } catch (_: Exception) {
-            // If it's a single string instead of array
             try {
                 when (element.jsonPrimitive.content.lowercase()) {
                     "notify" -> setOf(CronAction.NOTIFY)
@@ -301,6 +403,7 @@ class OkHttpOpenClawGateway(
     }
 
     companion object {
+        private const val TAG = "ClawWS"
         private const val RECONNECT_DELAY_MS = 5000L
     }
 }
