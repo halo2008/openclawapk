@@ -105,13 +105,13 @@ class OkHttpOpenClawGateway(
     }
 
     override suspend fun ttsConvert(text: String): Result<AudioData> {
-        return sendRequest("tts.convert", buildJsonObject {
+        return sendRequest("talk.speak", buildJsonObject {
             put("text", text)
         }).mapCatching { responseJson ->
             val element = json.parseToJsonElement(responseJson).jsonObject
-            val audioBase64 = element["audio"]?.jsonPrimitive?.content
-                ?: throw RuntimeException("No audio in TTS response")
-            val mimeType = element["mimeType"]?.jsonPrimitive?.content ?: "audio/wav"
+            val audioBase64 = element["audioBase64"]?.jsonPrimitive?.content
+                ?: throw RuntimeException("No audioBase64 in TTS response")
+            val mimeType = element["mimeType"]?.jsonPrimitive?.content ?: "audio/mp3"
             val bytes = android.util.Base64.decode(audioBase64, android.util.Base64.DEFAULT)
             AudioData(bytes = bytes, mimeType = mimeType)
         }
