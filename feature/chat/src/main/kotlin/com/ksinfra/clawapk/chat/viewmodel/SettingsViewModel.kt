@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ksinfra.clawapk.domain.model.AuthMode
 import com.ksinfra.clawapk.domain.model.ConnectionConfig
 import com.ksinfra.clawapk.domain.model.Language
+import com.ksinfra.clawapk.domain.port.OpenClawGateway
 import com.ksinfra.clawapk.domain.port.SettingsPort
 import com.ksinfra.clawapk.domain.usecase.ConnectToOpenClawUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,7 +15,8 @@ import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val settingsPort: SettingsPort,
-    private val connectToOpenClaw: ConnectToOpenClawUseCase
+    private val connectToOpenClaw: ConnectToOpenClawUseCase,
+    private val gateway: OpenClawGateway
 ) : ViewModel() {
 
     private val _serverUrl = MutableStateFlow("")
@@ -55,6 +57,12 @@ class SettingsViewModel(
             val config = buildConfig()
             settingsPort.saveConnectionConfig(config)
             connectToOpenClaw(config)
+
+            val ttsProvider = when (_ttsLanguage.value) {
+                "POLISH" -> "microsoft"
+                else -> "openai"
+            }
+            gateway.setTtsProvider(ttsProvider)
         }
     }
 
