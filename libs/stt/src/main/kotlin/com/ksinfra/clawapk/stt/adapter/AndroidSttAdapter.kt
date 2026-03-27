@@ -1,11 +1,13 @@
 package com.ksinfra.clawapk.stt.adapter
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.annotation.RequiresPermission
 import com.ksinfra.clawapk.domain.model.RecognitionState
 import com.ksinfra.clawapk.domain.port.SpeechToTextPort
 import com.ksinfra.clawapk.stt.R
@@ -22,6 +24,7 @@ class AndroidSttAdapter(
 
     private var speechRecognizer: SpeechRecognizer? = null
 
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     override fun startListening(languageCode: String) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _recognitionState.value = RecognitionState.Error(context.getString(R.string.stt_unavailable))

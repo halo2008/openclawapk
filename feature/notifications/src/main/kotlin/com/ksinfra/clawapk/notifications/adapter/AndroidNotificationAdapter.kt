@@ -1,9 +1,13 @@
 package com.ksinfra.clawapk.notifications.adapter
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.ksinfra.clawapk.domain.port.NotificationPort
 import com.ksinfra.clawapk.notifications.R
 
@@ -20,6 +24,8 @@ class AndroidNotificationAdapter(
     }
 
     override fun showMessageNotification(title: String, body: String) {
+        if (!canPostNotifications()) return
+
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(appIcon)
             .setContentTitle(title)
@@ -32,6 +38,8 @@ class AndroidNotificationAdapter(
     }
 
     override fun showCronNotification(jobName: String, message: String) {
+        if (!canPostNotifications()) return
+
         val notification = NotificationCompat.Builder(context, CHANNEL_CRON)
             .setSmallIcon(appIcon)
             .setContentTitle(context.getString(R.string.notification_cron_prefix, jobName))
@@ -41,6 +49,15 @@ class AndroidNotificationAdapter(
             .build()
 
         notificationManager.notify(notificationId++, notification)
+    }
+
+    private fun canPostNotifications(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
     }
 
     private fun createChannels() {
