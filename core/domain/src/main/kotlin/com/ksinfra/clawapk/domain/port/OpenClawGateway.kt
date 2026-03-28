@@ -28,6 +28,8 @@ interface OpenClawGateway {
     suspend fun setDefaultModel(modelKey: String): Result<String>
     suspend fun getModelConfig(): Result<ModelConfig>
     suspend fun setModelConfig(config: ModelConfig): Result<String>
+    suspend fun setProviderApiKey(provider: String, apiKey: String): Result<String>
+    suspend fun getConfiguredProviders(): Result<Set<String>>
     suspend fun listCronJobs(): Result<List<CronJobInfo>>
     suspend fun getConfig(path: String): Result<String>
 }

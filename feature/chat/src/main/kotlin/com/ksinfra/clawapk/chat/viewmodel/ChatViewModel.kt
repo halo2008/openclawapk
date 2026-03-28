@@ -65,6 +65,12 @@ class ChatViewModel(
     private val _modelConfig = MutableStateFlow(ModelConfig(primary = "", fallbacks = emptyList()))
     val modelConfig: StateFlow<ModelConfig> = _modelConfig.asStateFlow()
 
+    private val _allModels = MutableStateFlow<List<ModelInfo>>(emptyList())
+    val allModels: StateFlow<List<ModelInfo>> = _allModels.asStateFlow()
+
+    private val _configuredProviders = MutableStateFlow<Set<String>>(emptySet())
+    val configuredProviders: StateFlow<Set<String>> = _configuredProviders.asStateFlow()
+
     private val _cronJobs = MutableStateFlow<List<CronJobInfo>>(emptyList())
     val cronJobs: StateFlow<List<CronJobInfo>> = _cronJobs.asStateFlow()
 
@@ -237,6 +243,16 @@ class ChatViewModel(
         }
     }
 
+    fun onAddProviderKey(provider: String, apiKey: String) {
+        viewModelScope.launch {
+            gateway.setProviderApiKey(provider, apiKey).onSuccess {
+                // Refresh models and providers after adding key
+                loadModels()
+                loadCurrentModel()
+            }
+        }
+    }
+
     fun onToggleVoiceInput() {
         when (stt.recognitionState.value) {
             is RecognitionState.Listening -> stopVoiceInput()
@@ -269,8 +285,14 @@ class ChatViewModel(
 
     private fun loadModels() {
         viewModelScope.launch {
+            gateway.getConfiguredProviders().onSuccess { providers ->
+                _configuredProviders.value = providers
+            }
             gateway.listModels().onSuccess { models ->
-                _availableModels.value = models
+                _allModels.value = models
+                val configured = _configuredProviders.value
+                _availableModels.value = if (configured.isEmpty()) models
+                    else models.filter { it.provider in configured }
             }
         }
     }

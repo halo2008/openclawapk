@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -87,6 +88,7 @@ fun ChatScreen(
     val availableModels by viewModel.availableModels.collectAsState()
     val currentModel by viewModel.currentModel.collectAsState()
     val modelConfig by viewModel.modelConfig.collectAsState()
+    val configuredProviders by viewModel.configuredProviders.collectAsState()
     val cronJobs by viewModel.cronJobs.collectAsState()
     val ttft by viewModel.ttft.collectAsState()
     val contextInfo by viewModel.contextInfo.collectAsState()
@@ -95,6 +97,7 @@ fun ChatScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showModelMenu by remember { mutableStateOf(false) }
     var showCronDialog by remember { mutableStateOf(false) }
+    var showAddProviderDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -141,6 +144,10 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = { Text("Change Model") },
                                 onClick = { showMenu = false; showModelMenu = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Add Provider") },
+                                onClick = { showMenu = false; showAddProviderDialog = true }
                             )
                             DropdownMenuItem(
                                 text = { Text("Cron Jobs") },
@@ -250,6 +257,20 @@ fun ChatScreen(
         CronJobsDialog(
             jobs = cronJobs,
             onDismiss = { showCronDialog = false }
+        )
+    }
+
+    val allModels by viewModel.allModels.collectAsState()
+
+    if (showAddProviderDialog) {
+        AddProviderDialog(
+            availableModels = allModels,
+            configuredProviders = configuredProviders,
+            onAddProvider = { provider, apiKey ->
+                viewModel.onAddProviderKey(provider, apiKey)
+                showAddProviderDialog = false
+            },
+            onDismiss = { showAddProviderDialog = false }
         )
     }
 }
@@ -577,6 +598,110 @@ private fun ModelConfigDialog(
             }
         )
     }
+}
+
+@Composable
+private fun AddProviderDialog(
+    availableModels: List<ModelInfo>,
+    configuredProviders: Set<String>,
+    onAddProvider: (provider: String, apiKey: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Get all known providers from models list, minus already configured
+    val allProviders = remember(availableModels) {
+        availableModels.map { it.provider }.distinct().sorted()
+    }
+    val unconfiguredProviders = remember(allProviders, configuredProviders) {
+        allProviders.filter { it !in configuredProviders }
+    }
+
+    var selectedProvider by remember { mutableStateOf<String?>(null) }
+    var apiKey by remember { mutableStateOf("") }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Provider") },
+        text = {
+            Column {
+                if (selectedProvider == null) {
+                    if (unconfiguredProviders.isEmpty()) {
+                        Text("All providers are already configured")
+                    } else {
+                        Text(
+                            text = "Select a provider to add:",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        LazyColumn {
+                            items(unconfiguredProviders.size, key = { unconfiguredProviders[it] }) { i ->
+                                val provider = unconfiguredProviders[i]
+                                val modelCount = availableModels.count { it.provider == provider }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { selectedProvider = provider }
+                                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = provider,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = "$modelCount models",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = selectedProvider!!,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    val providerModels = availableModels.filter { it.provider == selectedProvider }
+                    Text(
+                        text = "Models: ${providerModels.joinToString(", ") { it.name }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it },
+                        label = { Text("API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (selectedProvider != null) {
+                TextButton(
+                    onClick = { onAddProvider(selectedProvider!!, apiKey) },
+                    enabled = apiKey.isNotBlank()
+                ) { Text("Save") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                if (selectedProvider != null) {
+                    selectedProvider = null
+                    apiKey = ""
+                } else {
+                    onDismiss()
+                }
+            }) {
+                Text(if (selectedProvider != null) "Back" else "Cancel")
+            }
+        }
+    )
 }
 
 @Composable
