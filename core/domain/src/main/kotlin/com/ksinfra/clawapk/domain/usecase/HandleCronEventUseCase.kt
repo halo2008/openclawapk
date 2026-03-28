@@ -21,9 +21,11 @@ class HandleCronEventUseCase(
                     notificationPort.showCronNotification(event.jobName, event.message ?: "")
                 }
                 CronAction.SPEAK -> {
-                    val textToSpeak = event.message ?: event.jobName
-                    tts.synthesize(textToSpeak, ttsLanguage)
-                        .onSuccess { audioData -> audioPlayer.play(audioData) }
+                    val textToSpeak = (event.message ?: event.jobName).trim()
+                    if (textToSpeak.isNotEmpty()) {
+                        tts.synthesize(textToSpeak, ttsLanguage)
+                            .onSuccess { audioData -> audioPlayer.play(audioData) }
+                    }
                 }
                 CronAction.PLAY_SOUND -> {
                     notificationPort.showCronNotification(event.jobName, event.message ?: "")

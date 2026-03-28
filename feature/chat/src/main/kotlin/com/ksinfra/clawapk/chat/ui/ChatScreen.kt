@@ -25,7 +25,12 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +67,8 @@ import com.ksinfra.clawapk.chat.viewmodel.ChatViewModel
 import com.ksinfra.clawapk.domain.model.ConnectionState
 import com.ksinfra.clawapk.domain.model.CronJobInfo
 import com.ksinfra.clawapk.domain.model.Message
+import com.ksinfra.clawapk.domain.model.ModelConfig
+import com.ksinfra.clawapk.domain.model.ModelInfo
 import com.ksinfra.clawapk.domain.model.MessageStatus
 import com.ksinfra.clawapk.domain.model.RecognitionState
 import com.ksinfra.clawapk.domain.model.Sender
@@ -79,6 +86,7 @@ fun ChatScreen(
     val isStreaming by viewModel.isStreaming.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val currentModel by viewModel.currentModel.collectAsState()
+    val modelConfig by viewModel.modelConfig.collectAsState()
     val cronJobs by viewModel.cronJobs.collectAsState()
     val ttft by viewModel.ttft.collectAsState()
     val contextInfo by viewModel.contextInfo.collectAsState()
@@ -227,53 +235,14 @@ fun ChatScreen(
     }
 
     if (showModelMenu) {
-        val groupedModels = availableModels.groupBy { it.provider }
-        var expandedProvider by remember { mutableStateOf<String?>(null) }
-
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showModelMenu = false; expandedProvider = null },
-            title = { Text("Select Model") },
-            text = {
-                LazyColumn {
-                    groupedModels.forEach { (provider, models) ->
-                        item(key = "header_$provider") {
-                            TextButton(
-                                onClick = {
-                                    expandedProvider = if (expandedProvider == provider) null else provider
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "${if (expandedProvider == provider) "▾" else "▸"} $provider (${models.size})",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                        if (expandedProvider == provider) {
-                            items(models, key = { it.key }) { model ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            model.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.padding(start = 16.dp)
-                                        )
-                                    },
-                                    onClick = {
-                                        viewModel.onSelectModel(model.key)
-                                        showModelMenu = false
-                                        expandedProvider = null
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showModelMenu = false; expandedProvider = null }) { Text("Cancel") }
-            }
+        ModelConfigDialog(
+            modelConfig = modelConfig,
+            availableModels = availableModels,
+            onSetPrimary = viewModel::onSetPrimaryModel,
+            onReorder = viewModel::onReorderModels,
+            onAddFallback = viewModel::onAddFallback,
+            onRemoveFallback = viewModel::onRemoveFallback,
+            onDismiss = { showModelMenu = false }
         )
     }
 
@@ -374,6 +343,238 @@ private fun ConnectionIndicator(state: ConnectionState) {
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = color
+        )
+    }
+}
+
+@Composable
+private fun ModelConfigDialog(
+    modelConfig: ModelConfig,
+    availableModels: List<ModelInfo>,
+    onSetPrimary: (String) -> Unit,
+    onReorder: (String, List<String>) -> Unit,
+    onAddFallback: (String) -> Unit,
+    onRemoveFallback: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    // All active model keys (primary + fallbacks)
+    val activeKeys = remember(modelConfig) {
+        buildList {
+            if (modelConfig.primary.isNotBlank()) add(modelConfig.primary)
+            addAll(modelConfig.fallbacks)
+        }
+    }
+
+    fun modelName(key: String): String {
+        val model = availableModels.find { it.key == key }
+        return model?.let { "${it.provider}/${it.name}" } ?: key
+    }
+
+    fun swapFallback(index: Int, direction: Int) {
+        val list = modelConfig.fallbacks.toMutableList()
+        val newIndex = index + direction
+        if (newIndex in list.indices) {
+            val tmp = list[index]
+            list[index] = list[newIndex]
+            list[newIndex] = tmp
+            onReorder(modelConfig.primary, list)
+        }
+    }
+
+    fun promoteToPrimary(fallbackKey: String) {
+        val newFallbacks = buildList {
+            add(modelConfig.primary)
+            addAll(modelConfig.fallbacks.filter { it != fallbackKey })
+        }.filter { it.isNotBlank() }
+        onReorder(fallbackKey, newFallbacks)
+    }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Model Configuration") },
+        text = {
+            LazyColumn {
+                // Primary model
+                item(key = "primary_header") {
+                    Text(
+                        text = "Primary",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                item(key = "primary_model") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Star,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (modelConfig.primary.isNotBlank()) modelName(modelConfig.primary) else "Not set",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Fallbacks header
+                item(key = "fallback_header") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Fallbacks (${modelConfig.fallbacks.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        IconButton(
+                            onClick = { showAddDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add fallback", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+
+                if (modelConfig.fallbacks.isEmpty()) {
+                    item(key = "no_fallbacks") {
+                        Text(
+                            text = "No fallbacks configured",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                }
+
+                // Fallback list
+                items(modelConfig.fallbacks.size, key = { "fb_${modelConfig.fallbacks[it]}" }) { index ->
+                    val fbKey = modelConfig.fallbacks[index]
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${index + 1}.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.width(24.dp)
+                        )
+                        Text(
+                            text = modelName(fbKey),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        // Set as primary
+                        IconButton(onClick = { promoteToPrimary(fbKey) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Star, contentDescription = "Set primary", modifier = Modifier.size(16.dp))
+                        }
+                        // Move up
+                        IconButton(
+                            onClick = { swapFallback(index, -1) },
+                            enabled = index > 0,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = "Move up", modifier = Modifier.size(16.dp))
+                        }
+                        // Move down
+                        IconButton(
+                            onClick = { swapFallback(index, 1) },
+                            enabled = index < modelConfig.fallbacks.size - 1,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowDownward, contentDescription = "Move down", modifier = Modifier.size(16.dp))
+                        }
+                        // Remove
+                        IconButton(onClick = { onRemoveFallback(fbKey) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+
+    // Add fallback dialog - shows available models not yet in config
+    if (showAddDialog) {
+        val unusedModels = availableModels.filter { it.key !in activeKeys }
+        val groupedModels = unusedModels.groupBy { it.provider }
+        var expandedProvider by remember { mutableStateOf<String?>(null) }
+
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text("Add Fallback") },
+            text = {
+                if (unusedModels.isEmpty()) {
+                    Text("All available models are already configured")
+                } else {
+                    LazyColumn {
+                        groupedModels.forEach { (provider, models) ->
+                            item(key = "add_header_$provider") {
+                                TextButton(
+                                    onClick = { expandedProvider = if (expandedProvider == provider) null else provider },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "${if (expandedProvider == provider) "▾" else "▸"} $provider (${models.size})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                            if (expandedProvider == provider) {
+                                items(models.size, key = { "add_${models[it].key}" }) { i ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                models[i].name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.padding(start = 16.dp)
+                                            )
+                                        },
+                                        onClick = {
+                                            onAddFallback(models[i].key)
+                                            showAddDialog = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
+            }
         )
     }
 }

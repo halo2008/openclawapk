@@ -5,6 +5,7 @@ import com.ksinfra.clawapk.domain.model.ChatHistoryMessage
 import com.ksinfra.clawapk.domain.model.ConnectionConfig
 import com.ksinfra.clawapk.domain.model.ConnectionState
 import com.ksinfra.clawapk.domain.model.CronJobInfo
+import com.ksinfra.clawapk.domain.model.ModelConfig
 import com.ksinfra.clawapk.domain.model.ModelInfo
 import com.ksinfra.clawapk.domain.model.OpenClawEvent
 import com.ksinfra.clawapk.domain.model.Session
@@ -25,6 +26,8 @@ interface OpenClawGateway {
     suspend fun resetSession(): Result<String>
     suspend fun listModels(): Result<List<ModelInfo>>
     suspend fun setDefaultModel(modelKey: String): Result<String>
+    suspend fun getModelConfig(): Result<ModelConfig>
+    suspend fun setModelConfig(config: ModelConfig): Result<String>
     suspend fun listCronJobs(): Result<List<CronJobInfo>>
     suspend fun getConfig(path: String): Result<String>
 }

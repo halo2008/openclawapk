@@ -150,6 +150,13 @@ class OkHttpOpenClawGateway(
     }
 
     override suspend fun listModels(): Result<List<ModelInfo>> {
+        // First get configured providers (those with API keys)
+        val configuredProviders = sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
+            val element = json.parseToJsonElement(responseJson).jsonObject
+            val providers = element["models"]?.jsonObject?.get("providers")?.jsonObject
+            providers?.keys ?: emptySet()
+        }.getOrDefault(emptySet())
+
         return sendRequest("models.list", null).mapCatching { responseJson ->
             android.util.Log.d(TAG, "models.list response: ${responseJson.take(500)}")
             val element = json.parseToJsonElement(responseJson)
@@ -163,6 +170,9 @@ class OkHttpOpenClawGateway(
                 val provider = obj["provider"]?.jsonPrimitive?.content ?: ""
                 val key = if (provider.isNotBlank()) "$provider/$id" else id
                 ModelInfo(key = key, name = name, provider = provider)
+            }.filter { model ->
+                // Only show models from providers that have API keys configured
+                configuredProviders.isEmpty() || model.provider in configuredProviders
             }
         }
     }
@@ -173,6 +183,50 @@ class OkHttpOpenClawGateway(
                 put("agents", buildJsonObject {
                     put("defaults", buildJsonObject {
                         put("model", modelKey)
+                    })
+                })
+            })
+        })
+    }
+
+    override suspend fun getModelConfig(): Result<com.ksinfra.clawapk.domain.model.ModelConfig> {
+        return sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
+            val element = json.parseToJsonElement(responseJson).jsonObject
+            val modelElement = element["agents"]?.jsonObject
+                ?.get("defaults")?.jsonObject
+                ?.get("model")
+            if (modelElement == null) {
+                com.ksinfra.clawapk.domain.model.ModelConfig(primary = "", fallbacks = emptyList())
+            } else {
+                try {
+                    // model can be a string (simple) or object {primary, fallbacks}
+                    val primary = modelElement.jsonPrimitive.content
+                    com.ksinfra.clawapk.domain.model.ModelConfig(primary = primary, fallbacks = emptyList())
+                } catch (_: Exception) {
+                    val obj = modelElement.jsonObject
+                    val primary = obj["primary"]?.jsonPrimitive?.content ?: ""
+                    val fallbacks = obj["fallbacks"]?.jsonArray?.mapNotNull {
+                        it.jsonPrimitive.content
+                    } ?: emptyList()
+                    com.ksinfra.clawapk.domain.model.ModelConfig(primary = primary, fallbacks = fallbacks)
+                }
+            }
+        }
+    }
+
+    override suspend fun setModelConfig(config: com.ksinfra.clawapk.domain.model.ModelConfig): Result<String> {
+        return sendRequest("config.patch", buildJsonObject {
+            put("patch", buildJsonObject {
+                put("agents", buildJsonObject {
+                    put("defaults", buildJsonObject {
+                        if (config.fallbacks.isEmpty()) {
+                            put("model", config.primary)
+                        } else {
+                            put("model", buildJsonObject {
+                                put("primary", config.primary)
+                                put("fallbacks", JsonArray(config.fallbacks.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                            })
+                        }
                     })
                 })
             })
@@ -200,12 +254,28 @@ class OkHttpOpenClawGateway(
                 ?: return@mapCatching emptyList()
             jobs.mapNotNull { job ->
                 val obj = job.jsonObject
+                val scheduleElement = obj["schedule"]
+                val scheduleText = try {
+                    // schedule can be a string or an object with expr/tz
+                    scheduleElement?.jsonPrimitive?.content
+                } catch (_: Exception) {
+                    val schedObj = scheduleElement?.jsonObject
+                    val expr = schedObj?.get("expr")?.jsonPrimitive?.content ?: ""
+                    val tz = schedObj?.get("tz")?.jsonPrimitive?.content
+                    if (tz != null) "$expr ($tz)" else expr
+                } ?: ""
+                val state = obj["state"]?.jsonObject
+                val lastRunMs = state?.get("lastRunAtMs")?.jsonPrimitive?.content?.toLongOrNull()
+                val lastRunText = lastRunMs?.let {
+                    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it))
+                }
+                val lastStatus = state?.get("lastStatus")?.jsonPrimitive?.content
                 CronJobInfo(
                     id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                     name = obj["name"]?.jsonPrimitive?.content ?: obj["id"]?.jsonPrimitive?.content ?: "",
-                    schedule = obj["schedule"]?.jsonPrimitive?.content ?: obj["cron"]?.jsonPrimitive?.content ?: "",
+                    schedule = scheduleText,
                     enabled = obj["enabled"]?.jsonPrimitive?.content?.toBoolean() != false,
-                    lastRun = obj["lastRunAt"]?.jsonPrimitive?.content
+                    lastRun = if (lastRunText != null) "$lastRunText ($lastStatus)" else null
                 )
             }
         }
@@ -356,8 +426,6 @@ class OkHttpOpenClawGateway(
             mode = "ui"
         )
 
-        val useDevicePairing = config.authMode is AuthMode.DevicePairing || config.authMode is AuthMode.None
-
         val connectParams = buildJsonObject {
             put("minProtocol", 3)
             put("maxProtocol", 3)
@@ -371,29 +439,28 @@ class OkHttpOpenClawGateway(
             put("role", role)
             put("scopes", kotlinx.serialization.json.JsonArray(scopes.map { kotlinx.serialization.json.JsonPrimitive(it) }))
 
-            if (useDevicePairing) {
-                val keys = deviceIdentity.getOrCreateKeys()
-                val signedAt = System.currentTimeMillis()
-                val signPayload = buildSignPayload(
-                    deviceId = keys.deviceId,
-                    clientId = clientInfo.id,
-                    clientMode = clientInfo.mode,
-                    role = role,
-                    scopes = scopes,
-                    signedAtMs = signedAt,
-                    token = null,
-                    nonce = nonce
-                )
-                val signature = deviceIdentity.sign(signPayload)
-                android.util.Log.d(TAG, "Sending connect with device=${keys.deviceId}")
-                put("device", buildJsonObject {
-                    put("id", keys.deviceId)
-                    put("publicKey", keys.publicKey)
-                    put("signature", signature)
-                    put("signedAt", signedAt)
-                    put("nonce", nonce)
-                })
-            }
+            val keys = deviceIdentity.getOrCreateKeys()
+            val signedAt = System.currentTimeMillis()
+            val deviceToken = (config.authMode as? AuthMode.DeviceToken)?.token
+            val signPayload = buildSignPayload(
+                deviceId = keys.deviceId,
+                clientId = clientInfo.id,
+                clientMode = clientInfo.mode,
+                role = role,
+                scopes = scopes,
+                signedAtMs = signedAt,
+                token = deviceToken,
+                nonce = nonce
+            )
+            val signature = deviceIdentity.sign(signPayload)
+            android.util.Log.d(TAG, "Sending connect with device=${keys.deviceId}")
+            put("device", buildJsonObject {
+                put("id", keys.deviceId)
+                put("publicKey", keys.publicKey)
+                put("signature", signature)
+                put("signedAt", signedAt)
+                put("nonce", nonce)
+            })
 
             put("caps", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("tool-events"))))
 
@@ -420,7 +487,7 @@ class OkHttpOpenClawGateway(
         }
 
         val frameJson = frame.toString()
-        android.util.Log.d(TAG, "Sending connect auth=${config.authMode::class.simpleName} devicePairing=$useDevicePairing")
+        android.util.Log.d(TAG, "Sending connect auth=${config.authMode::class.simpleName}")
         ws.send(frameJson)
     }
 
@@ -496,15 +563,22 @@ class OkHttpOpenClawGateway(
             }
             "cron" -> {
                 val payload = frame.payload?.jsonObject
-                val actions = parseActions(payload?.get("actions"))
-                OpenClawEvent.CronFired(
-                    CronEvent(
-                        jobId = payload?.get("jobId")?.jsonPrimitive?.content ?: "",
-                        jobName = payload?.get("jobName")?.jsonPrimitive?.content ?: "",
-                        message = payload?.get("message")?.jsonPrimitive?.content,
-                        actions = actions
+                val cronAction = payload?.get("action")?.jsonPrimitive?.content
+                if (cronAction == "finished") {
+                    val actions = parseActions(payload?.get("actions"))
+                    val jobId = payload?.get("jobId")?.jsonPrimitive?.content ?: ""
+                    OpenClawEvent.CronFired(
+                        CronEvent(
+                            jobId = jobId,
+                            jobName = payload?.get("jobName")?.jsonPrimitive?.content ?: jobId,
+                            message = payload?.get("summary")?.jsonPrimitive?.content
+                                ?: payload?.get("message")?.jsonPrimitive?.content,
+                            actions = actions
+                        )
                     )
-                )
+                } else {
+                    null
+                }
             }
             "tick" -> null // Server heartbeat — ignored to avoid unnecessary processing
             "shutdown" -> OpenClawEvent.Shutdown

@@ -7,6 +7,7 @@ import com.ksinfra.clawapk.domain.model.Language
 import com.ksinfra.clawapk.domain.model.Message
 import com.ksinfra.clawapk.domain.model.MessageStatus
 import com.ksinfra.clawapk.domain.model.CronJobInfo
+import com.ksinfra.clawapk.domain.model.ModelConfig
 import com.ksinfra.clawapk.domain.model.ModelInfo
 import com.ksinfra.clawapk.domain.model.OpenClawEvent
 import com.ksinfra.clawapk.domain.model.RecognitionState
@@ -60,6 +61,9 @@ class ChatViewModel(
 
     private val _isThinking = MutableStateFlow(false)
     val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
+
+    private val _modelConfig = MutableStateFlow(ModelConfig(primary = "", fallbacks = emptyList()))
+    val modelConfig: StateFlow<ModelConfig> = _modelConfig.asStateFlow()
 
     private val _cronJobs = MutableStateFlow<List<CronJobInfo>>(emptyList())
     val cronJobs: StateFlow<List<CronJobInfo>> = _cronJobs.asStateFlow()
@@ -124,8 +128,9 @@ class ChatViewModel(
 
     private fun loadCurrentModel() {
         viewModelScope.launch {
-            gateway.getConfig("agents.defaults.model").onSuccess { value ->
-                if (value.isNotBlank()) _currentModel.value = value
+            gateway.getModelConfig().onSuccess { config ->
+                _modelConfig.value = config
+                if (config.primary.isNotBlank()) _currentModel.value = config.primary
             }
         }
     }
@@ -180,6 +185,54 @@ class ChatViewModel(
         viewModelScope.launch {
             gateway.setDefaultModel(modelKey).onSuccess {
                 _currentModel.value = modelKey
+            }
+        }
+    }
+
+    fun onSetPrimaryModel(modelKey: String) {
+        viewModelScope.launch {
+            val current = _modelConfig.value
+            // Move old primary to fallbacks if it was set, remove new primary from fallbacks
+            val newFallbacks = buildList {
+                if (current.primary.isNotBlank() && current.primary != modelKey) add(current.primary)
+                addAll(current.fallbacks.filter { it != modelKey && it != current.primary })
+            }
+            val newConfig = ModelConfig(primary = modelKey, fallbacks = newFallbacks)
+            gateway.setModelConfig(newConfig).onSuccess {
+                _modelConfig.value = newConfig
+                _currentModel.value = modelKey
+            }
+        }
+    }
+
+    fun onReorderModels(primary: String, fallbacks: List<String>) {
+        viewModelScope.launch {
+            val newConfig = ModelConfig(primary = primary, fallbacks = fallbacks)
+            gateway.setModelConfig(newConfig).onSuccess {
+                _modelConfig.value = newConfig
+                _currentModel.value = primary
+            }
+        }
+    }
+
+    fun onRemoveFallback(modelKey: String) {
+        viewModelScope.launch {
+            val current = _modelConfig.value
+            val newConfig = current.copy(fallbacks = current.fallbacks.filter { it != modelKey })
+            gateway.setModelConfig(newConfig).onSuccess {
+                _modelConfig.value = newConfig
+            }
+        }
+    }
+
+    fun onAddFallback(modelKey: String) {
+        viewModelScope.launch {
+            val current = _modelConfig.value
+            if (modelKey != current.primary && modelKey !in current.fallbacks) {
+                val newConfig = current.copy(fallbacks = current.fallbacks + modelKey)
+                gateway.setModelConfig(newConfig).onSuccess {
+                    _modelConfig.value = newConfig
+                }
             }
         }
     }
