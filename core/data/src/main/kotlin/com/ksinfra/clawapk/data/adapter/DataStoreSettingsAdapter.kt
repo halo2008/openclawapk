@@ -26,6 +26,8 @@ class DataStoreSettingsAdapter(
         val TTS_LANGUAGE = stringPreferencesKey("tts_language")
         val PIPER_URL = stringPreferencesKey("piper_url")
         val KOKORO_URL = stringPreferencesKey("kokoro_url")
+        val GATEWAY_TOKEN = stringPreferencesKey("gateway_token")
+        val CF_COOKIE = stringPreferencesKey("cf_cookie")
     }
 
     override fun getConnectionConfig(): Flow<ConnectionConfig?> {
@@ -41,14 +43,16 @@ class DataStoreSettingsAdapter(
                 "token" -> AuthMode.Token(authValue)
                 "password" -> AuthMode.Password(authValue)
                 "device_token" -> AuthMode.DeviceToken(authValue)
-                "cloudflare" -> AuthMode.CloudflareAccess(authValue)
                 "device_pairing" -> AuthMode.DevicePairing
+                "cloudflare" -> AuthMode.None // migrated: cf cookie is now a separate field
                 else -> AuthMode.None
             }
 
             ConnectionConfig(
                 serverUrl = url,
                 authMode = authMode,
+                gatewayToken = prefs[Keys.GATEWAY_TOKEN] ?: "",
+                cfCookie = prefs[Keys.CF_COOKIE] ?: if (authType == "cloudflare") authValue else "",
                 ttsLanguage = language,
                 piperUrl = prefs[Keys.PIPER_URL] ?: "",
                 kokoroUrl = prefs[Keys.KOKORO_URL] ?: ""
@@ -59,6 +63,8 @@ class DataStoreSettingsAdapter(
     override suspend fun saveConnectionConfig(config: ConnectionConfig) {
         context.dataStore.edit { prefs ->
             prefs[Keys.SERVER_URL] = config.serverUrl
+            prefs[Keys.GATEWAY_TOKEN] = config.gatewayToken
+            prefs[Keys.CF_COOKIE] = config.cfCookie
             prefs[Keys.TTS_LANGUAGE] = config.ttsLanguage.name
             prefs[Keys.PIPER_URL] = config.piperUrl
             prefs[Keys.KOKORO_URL] = config.kokoroUrl
@@ -75,10 +81,6 @@ class DataStoreSettingsAdapter(
                 is AuthMode.DeviceToken -> {
                     prefs[Keys.AUTH_TYPE] = "device_token"
                     prefs[Keys.AUTH_VALUE] = mode.token
-                }
-                is AuthMode.CloudflareAccess -> {
-                    prefs[Keys.AUTH_TYPE] = "cloudflare"
-                    prefs[Keys.AUTH_VALUE] = mode.cfCookie
                 }
                 is AuthMode.DevicePairing -> {
                     prefs[Keys.AUTH_TYPE] = "device_pairing"

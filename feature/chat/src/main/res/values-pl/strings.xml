@@ -27,6 +27,7 @@
 
     <!-- Ekran logowania Cloudflare -->
     <string name="cf_auth_title">Logowanie Cloudflare</string>
+    <string name="settings_gateway_token">Token gateway</string>
     <string name="settings_auth_value_token">Token</string>
     <string name="settings_auth_value_password">Haslo</string>
     <string name="settings_tts_language">Jezyk TTS</string>

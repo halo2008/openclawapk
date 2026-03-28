@@ -37,6 +37,12 @@ class SettingsViewModel(
     private val _kokoroUrl = MutableStateFlow("")
     val kokoroUrl: StateFlow<String> = _kokoroUrl.asStateFlow()
 
+    private val _gatewayToken = MutableStateFlow("")
+    val gatewayToken: StateFlow<String> = _gatewayToken.asStateFlow()
+
+    private val _cfCookie = MutableStateFlow("")
+    val cfCookie: StateFlow<String> = _cfCookie.asStateFlow()
+
     init {
         loadSettings()
     }
@@ -47,10 +53,11 @@ class SettingsViewModel(
         if (type == "none" || type == "device_pairing") _authValue.value = ""
     }
     fun onAuthValueChanged(value: String) { _authValue.value = value }
-    fun onCfCookieObtained(cookie: String) { _authValue.value = cookie }
+    fun onCfCookieObtained(cookie: String) { _cfCookie.value = cookie }
     fun onTtsLanguageChanged(language: String) { _ttsLanguage.value = language }
     fun onPiperUrlChanged(url: String) { _piperUrl.value = url }
     fun onKokoroUrlChanged(url: String) { _kokoroUrl.value = url }
+    fun onGatewayTokenChanged(token: String) { _gatewayToken.value = token }
 
     fun onSave() {
         viewModelScope.launch {
@@ -74,11 +81,12 @@ class SettingsViewModel(
                     _ttsLanguage.value = config.ttsLanguage.name
                     _piperUrl.value = config.piperUrl
                     _kokoroUrl.value = config.kokoroUrl
+                    _gatewayToken.value = config.gatewayToken
+                    _cfCookie.value = config.cfCookie
                     when (val mode = config.authMode) {
                         is AuthMode.Token -> { _authType.value = "token"; _authValue.value = mode.token }
                         is AuthMode.Password -> { _authType.value = "password"; _authValue.value = mode.password }
                         is AuthMode.DeviceToken -> { _authType.value = "device_token"; _authValue.value = mode.token }
-                        is AuthMode.CloudflareAccess -> { _authType.value = "cloudflare"; _authValue.value = mode.cfCookie }
                         is AuthMode.DevicePairing -> _authType.value = "device_pairing"
                         is AuthMode.None -> _authType.value = "none"
                     }
@@ -91,13 +99,14 @@ class SettingsViewModel(
         val authMode = when (_authType.value) {
             "token" -> AuthMode.Token(_authValue.value)
             "password" -> AuthMode.Password(_authValue.value)
-            "cloudflare" -> AuthMode.CloudflareAccess(_authValue.value)
             "device_pairing" -> AuthMode.DevicePairing
             else -> AuthMode.None
         }
         return ConnectionConfig(
             serverUrl = _serverUrl.value,
             authMode = authMode,
+            gatewayToken = _gatewayToken.value,
+            cfCookie = _cfCookie.value,
             ttsLanguage = Language.valueOf(_ttsLanguage.value),
             piperUrl = _piperUrl.value,
             kokoroUrl = _kokoroUrl.value

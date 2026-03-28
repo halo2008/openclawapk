@@ -41,9 +41,9 @@ fun SettingsScreen(
     onNavigateToCfAuth: () -> Unit = {}
 ) {
     val serverUrl by viewModel.serverUrl.collectAsState()
-    val authType by viewModel.authType.collectAsState()
-    val authValue by viewModel.authValue.collectAsState()
     val ttsLanguage by viewModel.ttsLanguage.collectAsState()
+    val gatewayToken by viewModel.gatewayToken.collectAsState()
+    val cfCookie by viewModel.cfCookie.collectAsState()
     val piperUrl by viewModel.piperUrl.collectAsState()
     val kokoroUrl by viewModel.kokoroUrl.collectAsState()
 
@@ -76,39 +76,29 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            AuthTypeDropdown(
-                selectedType = authType,
-                onTypeSelected = viewModel::onAuthTypeChanged
-            )
+            // Cloudflare Access — always visible
+            val cfStatus = if (cfCookie.isNotBlank())
+                stringResource(R.string.settings_cf_authenticated)
+            else
+                stringResource(R.string.settings_cf_login)
 
-            if (authType == "cloudflare") {
-                Spacer(modifier = Modifier.height(8.dp))
-                val cfStatus = if (authValue.isNotBlank())
-                    stringResource(R.string.settings_cf_authenticated)
-                else
-                    stringResource(R.string.settings_cf_login)
-
-                OutlinedButton(
-                    onClick = { onNavigateToCfAuth() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(cfStatus)
-                }
-            } else if (authType != "none" && authType != "device_pairing") {
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = authValue,
-                    onValueChange = viewModel::onAuthValueChanged,
-                    label = {
-                        Text(
-                            if (authType == "password") stringResource(R.string.settings_auth_value_password)
-                            else stringResource(R.string.settings_auth_value_token)
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+            OutlinedButton(
+                onClick = { onNavigateToCfAuth() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(cfStatus)
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Gateway token — always visible
+            OutlinedTextField(
+                value = gatewayToken,
+                onValueChange = viewModel::onGatewayTokenChanged,
+                label = { Text(stringResource(R.string.settings_gateway_token)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -124,52 +114,6 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.settings_save))
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AuthTypeDropdown(
-    selectedType: String,
-    onTypeSelected: (String) -> Unit
-) {
-    val options = listOf(
-        "none" to stringResource(R.string.settings_auth_none),
-        "cloudflare" to stringResource(R.string.settings_auth_cloudflare),
-        "token" to stringResource(R.string.settings_auth_token),
-        "password" to stringResource(R.string.settings_auth_password),
-        "device_pairing" to stringResource(R.string.settings_auth_device_pairing)
-    )
-    var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it }
-    ) {
-        OutlinedTextField(
-            value = options.find { it.first == selectedType }?.second ?: stringResource(R.string.settings_auth_none),
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(stringResource(R.string.settings_auth_type)) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                .fillMaxWidth()
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            options.forEach { (value, label) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        onTypeSelected(value)
-                        expanded = false
-                    }
-                )
             }
         }
     }

@@ -363,11 +363,8 @@ class OkHttpOpenClawGateway(
 
         val requestBuilder = Request.Builder().url(wsUrl)
 
-        if (config.authMode is AuthMode.CloudflareAccess) {
-            val cookie = (config.authMode as AuthMode.CloudflareAccess).cfCookie
-            if (cookie.isNotBlank()) {
-                requestBuilder.addHeader("Cookie", "CF_Authorization=$cookie")
-            }
+        if (config.cfCookie.isNotBlank()) {
+            requestBuilder.addHeader("Cookie", "CF_Authorization=${config.cfCookie}")
         }
 
         val request = requestBuilder.build()
@@ -476,7 +473,11 @@ class OkHttpOpenClawGateway(
 
             val keys = deviceIdentity.getOrCreateKeys()
             val signedAt = System.currentTimeMillis()
-            val deviceToken = (config.authMode as? AuthMode.DeviceToken)?.token
+            val signToken = when (config.authMode) {
+                is AuthMode.DeviceToken -> (config.authMode as AuthMode.DeviceToken).token
+                is AuthMode.Token -> (config.authMode as AuthMode.Token).token
+                else -> config.gatewayToken.ifBlank { null }
+            }
             val signPayload = buildSignPayload(
                 deviceId = keys.deviceId,
                 clientId = clientInfo.id,
@@ -484,7 +485,7 @@ class OkHttpOpenClawGateway(
                 role = role,
                 scopes = scopes,
                 signedAtMs = signedAt,
-                token = deviceToken,
+                token = signToken,
                 nonce = nonce
             )
             val signature = deviceIdentity.sign(signPayload)
@@ -503,7 +504,7 @@ class OkHttpOpenClawGateway(
                 is AuthMode.Token -> AuthParams(token = mode.token)
                 is AuthMode.Password -> AuthParams(password = mode.password)
                 is AuthMode.DeviceToken -> AuthParams(deviceToken = mode.token)
-                else -> null
+                else -> if (config.gatewayToken.isNotBlank()) AuthParams(token = config.gatewayToken) else null
             }
             if (authParams != null) {
                 put("auth", buildJsonObject {
