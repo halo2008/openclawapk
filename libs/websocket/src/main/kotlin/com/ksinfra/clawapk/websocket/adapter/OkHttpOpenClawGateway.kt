@@ -79,6 +79,7 @@ class OkHttpOpenClawGateway(
     private var shouldReconnect = false
     private var connectNonce: String? = null
     private var connectSent = false
+    @Volatile private var configBaseHash: String? = null
 
     override suspend fun connect(config: ConnectionConfig) {
         currentConfig = config
@@ -109,12 +110,39 @@ class OkHttpOpenClawGateway(
         return sendRequest("sessions.list", null).map { emptyList() }
     }
 
+    private suspend fun fetchConfig(): Result<JsonObject> {
+        return sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
+            val root = json.parseToJsonElement(responseJson).jsonObject
+            // Store hash for config.patch
+            root["hash"]?.jsonPrimitive?.content?.let { configBaseHash = it }
+            root["_hash"]?.jsonPrimitive?.content?.let { configBaseHash = it }
+            root["baseHash"]?.jsonPrimitive?.content?.let { configBaseHash = it }
+            android.util.Log.d(TAG, "config.get hash=$configBaseHash keys=${root.keys}")
+            root["config"]?.jsonObject ?: root
+        }
+    }
+
+    private suspend fun patchConfig(raw: JsonObject): Result<String> {
+        // Fetch latest hash if we don't have one
+        if (configBaseHash == null) {
+            fetchConfig()
+        }
+        val params = buildJsonObject {
+            put("raw", raw.toString())
+            configBaseHash?.let { put("baseHash", it) }
+        }
+        val result = sendRequest("config.patch", params)
+        // Refresh hash after successful patch
+        if (result.isSuccess) {
+            fetchConfig()
+        }
+        return result
+    }
+
     override suspend fun setTtsProvider(provider: String): Result<String> {
-        return sendRequest("config.patch", buildJsonObject {
-            put("patch", buildJsonObject {
-                put("talk", buildJsonObject {
-                    put("provider", provider)
-                })
+        return patchConfig(buildJsonObject {
+            put("talk", buildJsonObject {
+                put("provider", provider)
             })
         })
     }
@@ -150,13 +178,6 @@ class OkHttpOpenClawGateway(
     }
 
     override suspend fun listModels(): Result<List<ModelInfo>> {
-        // First get configured providers (those with API keys)
-        val configuredProviders = sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
-            val element = json.parseToJsonElement(responseJson).jsonObject
-            val providers = element["models"]?.jsonObject?.get("providers")?.jsonObject
-            providers?.keys ?: emptySet()
-        }.getOrDefault(emptySet())
-
         return sendRequest("models.list", null).mapCatching { responseJson ->
             android.util.Log.d(TAG, "models.list response: ${responseJson.take(500)}")
             val element = json.parseToJsonElement(responseJson)
@@ -170,36 +191,31 @@ class OkHttpOpenClawGateway(
                 val provider = obj["provider"]?.jsonPrimitive?.content ?: ""
                 val key = if (provider.isNotBlank()) "$provider/$id" else id
                 ModelInfo(key = key, name = name, provider = provider)
-            }.filter { model ->
-                // Only show models from providers that have API keys configured
-                configuredProviders.isEmpty() || model.provider in configuredProviders
             }
         }
     }
 
     override suspend fun setDefaultModel(modelKey: String): Result<String> {
-        return sendRequest("config.patch", buildJsonObject {
-            put("patch", buildJsonObject {
-                put("agents", buildJsonObject {
-                    put("defaults", buildJsonObject {
-                        put("model", modelKey)
-                    })
+        return patchConfig(buildJsonObject {
+            put("agents", buildJsonObject {
+                put("defaults", buildJsonObject {
+                    put("model", modelKey)
                 })
             })
         })
     }
 
     override suspend fun getModelConfig(): Result<com.ksinfra.clawapk.domain.model.ModelConfig> {
-        return sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
-            val element = json.parseToJsonElement(responseJson).jsonObject
-            val modelElement = element["agents"]?.jsonObject
+        return fetchConfig().mapCatching { configRoot ->
+            val modelElement = configRoot["agents"]?.jsonObject
                 ?.get("defaults")?.jsonObject
                 ?.get("model")
+            android.util.Log.d(TAG, "modelElement: $modelElement")
+
             if (modelElement == null) {
                 com.ksinfra.clawapk.domain.model.ModelConfig(primary = "", fallbacks = emptyList())
             } else {
                 try {
-                    // model can be a string (simple) or object {primary, fallbacks}
                     val primary = modelElement.jsonPrimitive.content
                     com.ksinfra.clawapk.domain.model.ModelConfig(primary = primary, fallbacks = emptyList())
                 } catch (_: Exception) {
@@ -215,33 +231,52 @@ class OkHttpOpenClawGateway(
     }
 
     override suspend fun setModelConfig(config: com.ksinfra.clawapk.domain.model.ModelConfig): Result<String> {
-        return sendRequest("config.patch", buildJsonObject {
-            put("patch", buildJsonObject {
-                put("agents", buildJsonObject {
-                    put("defaults", buildJsonObject {
-                        if (config.fallbacks.isEmpty()) {
-                            put("model", config.primary)
-                        } else {
-                            put("model", buildJsonObject {
-                                put("primary", config.primary)
-                                put("fallbacks", JsonArray(config.fallbacks.map { kotlinx.serialization.json.JsonPrimitive(it) }))
-                            })
-                        }
+        return patchConfig(buildJsonObject {
+            put("agents", buildJsonObject {
+                put("defaults", buildJsonObject {
+                    if (config.fallbacks.isEmpty()) {
+                        put("model", config.primary)
+                    } else {
+                        put("model", buildJsonObject {
+                            put("primary", config.primary)
+                            put("fallbacks", JsonArray(config.fallbacks.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                        })
+                    }
+                })
+            })
+        })
+    }
+
+    override suspend fun setProviderApiKey(provider: String, apiKey: String): Result<String> {
+        return patchConfig(buildJsonObject {
+            put("models", buildJsonObject {
+                put("providers", buildJsonObject {
+                    put(provider, buildJsonObject {
+                        put("apiKey", apiKey)
                     })
                 })
             })
         })
     }
 
+    override suspend fun getConfiguredProviders(): Result<Set<String>> {
+        return fetchConfig().mapCatching { configRoot ->
+            val providers = configRoot["models"]?.jsonObject?.get("providers")?.jsonObject
+            providers?.keys ?: emptySet()
+        }
+    }
+
     override suspend fun getConfig(path: String): Result<String> {
-        return sendRequest("config.get", buildJsonObject {}).mapCatching { responseJson ->
-            val element = json.parseToJsonElement(responseJson).jsonObject
-            // Navigate the path like "agents.defaults.model"
-            var current: kotlinx.serialization.json.JsonElement = element
+        return fetchConfig().mapCatching { configRoot ->
+            var current: kotlinx.serialization.json.JsonElement = configRoot
             for (key in path.split(".")) {
                 current = (current as? JsonObject)?.get(key) ?: return@mapCatching ""
             }
-            current.jsonPrimitive.content
+            try {
+                current.jsonPrimitive.content
+            } catch (_: Exception) {
+                current.toString()
+            }
         }
     }
 
