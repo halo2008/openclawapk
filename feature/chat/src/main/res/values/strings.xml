@@ -11,6 +11,40 @@
     <string name="connection_reconnecting">Reconnecting…</string>
     <string name="connection_disconnected">Disconnected</string>
 
+    <!-- Menu -->
+    <string name="menu_change_model">Change Model</string>
+    <string name="menu_add_provider">Add Provider</string>
+    <string name="menu_cron_jobs">Cron Jobs</string>
+
+    <!-- Model config dialog -->
+    <string name="model_config_title">Model Configuration</string>
+    <string name="model_primary">Primary</string>
+    <string name="model_not_set">Not set</string>
+    <string name="model_fallbacks">Fallbacks (%d)</string>
+    <string name="model_no_fallbacks">No fallbacks configured</string>
+    <string name="model_add_fallback">Add Fallback</string>
+    <string name="model_all_configured">All available models are already configured</string>
+    <string name="model_set_primary">Set primary</string>
+    <string name="model_move_up">Move up</string>
+    <string name="model_move_down">Move down</string>
+    <string name="model_remove">Remove</string>
+
+    <!-- Cron dialog -->
+    <string name="cron_no_jobs">No cron jobs configured</string>
+    <string name="cron_active">Active</string>
+    <string name="cron_disabled">Disabled</string>
+    <string name="cron_last_run">Last: %s</string>
+
+    <!-- Provider dialog -->
+    <string name="provider_title">Add Provider</string>
+    <string name="provider_api_key">API Key</string>
+    <string name="provider_add">Add</string>
+
+    <!-- Common -->
+    <string name="close">Close</string>
+    <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
+
     <!-- Settings screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
@@ -33,9 +67,6 @@
     <string name="settings_tts_language">TTS language</string>
     <string name="settings_tts_voice">TTS voice</string>
     <string name="settings_tts_default">Default system voice</string>
-    <string name="settings_tts_polish">Polish (Piper)</string>
-    <string name="settings_tts_english">English (Kokoro)</string>
-    <string name="settings_piper_url">Piper TTS URL (Polish)</string>
-    <string name="settings_kokoro_url">Kokoro TTS URL (English)</string>
     <string name="settings_save">Save and connect</string>
+    <string name="settings_fcm_register">Force FCM registration</string>
 </resources>

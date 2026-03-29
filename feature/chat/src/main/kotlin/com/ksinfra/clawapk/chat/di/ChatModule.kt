@@ -44,11 +44,16 @@ val chatModule = module {
     }
 
     viewModel {
+        val context = get<android.content.Context>()
         SettingsViewModel(
             settingsPort = get(),
             connectToOpenClaw = get(),
             gateway = get(),
-            ttsPort = get()
+            ttsPort = get(),
+            deviceIdProvider = {
+                context.getSharedPreferences("openclaw_device", android.content.Context.MODE_PRIVATE)
+                    .getString("device_id", "unknown") ?: "unknown"
+            }
         )
     }
 }

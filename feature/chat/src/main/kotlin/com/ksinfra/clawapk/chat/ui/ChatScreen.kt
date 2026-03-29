@@ -143,19 +143,19 @@ fun ChatScreen(
                             onDismissRequest = { showMenu = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Change Model") },
+                                text = { Text(stringResource(R.string.menu_change_model)) },
                                 onClick = { showMenu = false; showModelMenu = true }
                             )
                             DropdownMenuItem(
-                                text = { Text("Add Provider") },
+                                text = { Text(stringResource(R.string.menu_add_provider)) },
                                 onClick = { showMenu = false; showAddProviderDialog = true }
                             )
                             DropdownMenuItem(
-                                text = { Text("Cron Jobs") },
+                                text = { Text(stringResource(R.string.menu_cron_jobs)) },
                                 onClick = { showMenu = false; viewModel.onLoadCronJobs(); showCronDialog = true }
                             )
                             DropdownMenuItem(
-                                text = { Text("Settings") },
+                                text = { Text(stringResource(R.string.chat_settings)) },
                                 onClick = { showMenu = false; onNavigateToSettings() }
                             )
                         }
@@ -283,10 +283,10 @@ private fun CronJobsDialog(
 ) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Cron Jobs") },
+        title = { Text(stringResource(R.string.menu_cron_jobs)) },
         text = {
             if (jobs.isEmpty()) {
-                Text("No cron jobs configured")
+                Text(stringResource(R.string.cron_no_jobs))
             } else {
                 LazyColumn {
                     items(jobs, key = { it.id }) { job ->
@@ -312,13 +312,13 @@ private fun CronJobsDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (job.enabled) "Active" else "Disabled",
+                                    text = if (job.enabled) stringResource(R.string.cron_active) else stringResource(R.string.cron_disabled),
                                     style = MaterialTheme.typography.labelSmall
                                 )
                                 if (job.lastRun != null) {
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(
-                                        text = "Last: ${job.lastRun}",
+                                        text = stringResource(R.string.cron_last_run, job.lastRun ?: ""),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -332,7 +332,7 @@ private fun CronJobsDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.close))
             }
         }
     )
@@ -414,13 +414,13 @@ private fun ModelConfigDialog(
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Model Configuration") },
+        title = { Text(stringResource(R.string.model_config_title)) },
         text = {
             LazyColumn {
                 // Primary model
                 item(key = "primary_header") {
                     Text(
-                        text = "Primary",
+                        text = stringResource(R.string.model_primary),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(bottom = 4.dp)
@@ -445,7 +445,7 @@ private fun ModelConfigDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (modelConfig.primary.isNotBlank()) modelName(modelConfig.primary) else "Not set",
+                            text = if (modelConfig.primary.isNotBlank()) modelName(modelConfig.primary) else stringResource(R.string.model_not_set),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f)
                         )
@@ -462,7 +462,7 @@ private fun ModelConfigDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Fallbacks (${modelConfig.fallbacks.size})",
+                            text = stringResource(R.string.model_fallbacks, modelConfig.fallbacks.size),
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -470,7 +470,7 @@ private fun ModelConfigDialog(
                             onClick = { showAddDialog = true },
                             modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = "Add fallback", modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.model_add_fallback), modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -478,7 +478,7 @@ private fun ModelConfigDialog(
                 if (modelConfig.fallbacks.isEmpty()) {
                     item(key = "no_fallbacks") {
                         Text(
-                            text = "No fallbacks configured",
+                            text = stringResource(R.string.model_no_fallbacks),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 8.dp)
@@ -515,7 +515,7 @@ private fun ModelConfigDialog(
                         )
                         // Set as primary
                         IconButton(onClick = { promoteToPrimary(fbKey) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Star, contentDescription = "Set primary", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Star, contentDescription = stringResource(R.string.model_set_primary), modifier = Modifier.size(16.dp))
                         }
                         // Move up
                         IconButton(
@@ -523,7 +523,7 @@ private fun ModelConfigDialog(
                             enabled = index > 0,
                             modifier = Modifier.size(28.dp)
                         ) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = "Move up", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.ArrowUpward, contentDescription = stringResource(R.string.model_move_up), modifier = Modifier.size(16.dp))
                         }
                         // Move down
                         IconButton(
@@ -531,18 +531,18 @@ private fun ModelConfigDialog(
                             enabled = index < modelConfig.fallbacks.size - 1,
                             modifier = Modifier.size(28.dp)
                         ) {
-                            Icon(Icons.Default.ArrowDownward, contentDescription = "Move down", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.ArrowDownward, contentDescription = stringResource(R.string.model_move_down), modifier = Modifier.size(16.dp))
                         }
                         // Remove
                         IconButton(onClick = { onRemoveFallback(fbKey) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.model_remove), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
         }
     )
 
@@ -554,10 +554,10 @@ private fun ModelConfigDialog(
 
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showAddDialog = false },
-            title = { Text("Add Fallback") },
+            title = { Text(stringResource(R.string.model_add_fallback)) },
             text = {
                 if (unusedModels.isEmpty()) {
-                    Text("All available models are already configured")
+                    Text(stringResource(R.string.model_all_configured))
                 } else {
                     LazyColumn {
                         groupedModels.forEach { (provider, models) ->
@@ -595,7 +595,7 @@ private fun ModelConfigDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showAddDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -621,7 +621,7 @@ private fun AddProviderDialog(
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Provider") },
+        title = { Text(stringResource(R.string.provider_title)) },
         text = {
             Column {
                 if (selectedProvider == null) {
@@ -675,7 +675,7 @@ private fun AddProviderDialog(
                     OutlinedTextField(
                         value = apiKey,
                         onValueChange = { apiKey = it },
-                        label = { Text("API Key") },
+                        label = { Text(stringResource(R.string.provider_api_key)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -699,7 +699,7 @@ private fun AddProviderDialog(
                     onDismiss()
                 }
             }) {
-                Text(if (selectedProvider != null) "Back" else "Cancel")
+                Text(if (selectedProvider != null) stringResource(R.string.back) else stringResource(R.string.cancel))
             }
         }
     )
@@ -755,7 +755,7 @@ private fun MessageBubble(message: Message) {
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 280.dp)
+                .then(if (isUser) Modifier.widthIn(max = 280.dp) else Modifier.fillMaxWidth())
                 .clip(shape)
                 .background(bgColor)
                 .padding(horizontal = 12.dp, vertical = 8.dp)

@@ -47,6 +47,7 @@ fun SettingsScreen(
     val availableVoices by viewModel.availableVoices.collectAsState()
     val gatewayToken by viewModel.gatewayToken.collectAsState()
     val cfCookie by viewModel.cfCookie.collectAsState()
+    val fcmStatus by viewModel.fcmStatus.collectAsState()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -115,6 +116,18 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.settings_save))
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedButton(
+                onClick = viewModel::onForceFcmRegistration,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (fcmStatus.isBlank()) stringResource(R.string.settings_fcm_register)
+                    else "${stringResource(R.string.settings_fcm_register)}: $fcmStatus"
+                )
             }
         }
     }

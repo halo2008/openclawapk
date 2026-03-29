@@ -42,6 +42,9 @@ dependencies {
     implementation(libs.koin.core)
     implementation(libs.koin.androidx.compose)
     implementation(libs.markdown.renderer.m3)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+    implementation(libs.okhttp)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
