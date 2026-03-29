@@ -631,7 +631,8 @@ class OkHttpOpenClawGateway(
     }
 
     private fun parseActions(element: JsonElement?): Set<CronAction> {
-        if (element == null) return setOf(CronAction.NOTIFY, CronAction.SPEAK, CronAction.VIBRATE)
+        // Default: only notify — TTS for cron is handled via FCM push ttsMessage
+        if (element == null) return setOf(CronAction.NOTIFY)
 
         return try {
             element.jsonArray.mapNotNull { item ->
@@ -643,7 +644,7 @@ class OkHttpOpenClawGateway(
                     else -> null
                 }
             }.toSet().ifEmpty {
-                setOf(CronAction.NOTIFY, CronAction.SPEAK, CronAction.VIBRATE)
+                setOf(CronAction.NOTIFY)
             }
         } catch (_: Exception) {
             try {
@@ -652,10 +653,10 @@ class OkHttpOpenClawGateway(
                     "speak" -> setOf(CronAction.SPEAK)
                     "sound", "play_sound" -> setOf(CronAction.PLAY_SOUND)
                     "vibrate" -> setOf(CronAction.VIBRATE)
-                    else -> setOf(CronAction.NOTIFY, CronAction.SPEAK, CronAction.VIBRATE)
+                    else -> setOf(CronAction.NOTIFY)
                 }
             } catch (_: Exception) {
-                setOf(CronAction.NOTIFY, CronAction.SPEAK, CronAction.VIBRATE)
+                setOf(CronAction.NOTIFY)
             }
         }
     }

@@ -86,6 +86,9 @@ class ChatViewModel(
     private var streamingMessageId: String? = null
     private var lastStreamRunId: String? = null
 
+    // TTS only when user initiated the conversation (not cron/system events)
+    private var userSentLastMessage = false
+
     init {
         autoConnect()
         observeAllEvents()
@@ -143,6 +146,7 @@ class ChatViewModel(
 
     fun onSendMessage(text: String) {
         if (text.isBlank()) return
+        userSentLastMessage = true
         streamStartTime = System.currentTimeMillis()
         _ttft.value = null
         _isThinking.value = true
@@ -382,11 +386,12 @@ class ChatViewModel(
         val msgCount = _messages.value.size
         _contextInfo.value = "$msgCount messages"
 
-        if (_voiceOutputEnabled.value) {
+        if (_voiceOutputEnabled.value && userSentLastMessage) {
             viewModelScope.launch {
                 speakResponse(event.text, ttsLanguage)
             }
         }
+        userSentLastMessage = false
     }
 
     private fun handleError(event: OpenClawEvent.AgentError) {
