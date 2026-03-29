@@ -63,6 +63,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.m3.Markdown
 import com.ksinfra.clawapk.chat.R
 import com.ksinfra.clawapk.chat.viewmodel.ChatViewModel
 import com.ksinfra.clawapk.domain.model.ConnectionState
@@ -760,10 +761,16 @@ private fun MessageBubble(message: Message) {
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Column {
-                Text(
-                    text = message.content,
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                if (isUser) {
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                } else {
+                    Markdown(
+                        content = message.content,
+                    )
+                }
                 if (message.status == MessageStatus.SENDING && message.sender == Sender.AGENT) {
                     Text(
                         text = "...",

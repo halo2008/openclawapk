@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.koin.core)
     implementation(libs.koin.androidx.compose)
+    implementation(libs.markdown.renderer.m3)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

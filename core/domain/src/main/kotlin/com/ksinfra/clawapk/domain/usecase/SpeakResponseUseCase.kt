@@ -10,7 +10,9 @@ class SpeakResponseUseCase(
 ) {
     suspend operator fun invoke(text: String, language: Language): Result<Unit> {
         return tts.synthesize(text, language).mapCatching { audioData ->
-            audioPlayer.play(audioData)
+            if (audioData.bytes.isNotEmpty()) {
+                audioPlayer.play(audioData)
+            }
         }
     }
 }
