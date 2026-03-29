@@ -3,6 +3,7 @@
 .gradle/
 build/
 **/build/
+/.idea
 
 # Local properties
 local.properties
@@ -17,6 +18,8 @@ local.properties
 /.idea/deploymentTargetSelector.xml
 /.idea/other.xml
 /.idea/render.experimental.xml
+/.idea/misc.xml
+/.idea/kotlinc.xml
 
 # OS
 .DS_Store
@@ -33,3 +36,4 @@ captures/
 
 # Signing config
 signing.properties
+google-services.json

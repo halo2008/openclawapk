@@ -12,6 +12,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.koin.android.ext.android.inject
 
 class ClawFirebaseMessagingService : FirebaseMessagingService() {
@@ -71,14 +75,31 @@ class ClawFirebaseMessagingService : FirebaseMessagingService() {
     private suspend fun registerTokenWithServer(token: String) {
         try {
             val config = settingsPort.getConnectionConfig().first() ?: return
-            val serverUrl = config.serverUrl.trim()
+            val baseUrl = config.serverUrl.trim()
                 .let { it.replace(Regex("^\\w+://"), "") }
-                .let { "https://$it" }
-            // TODO: Send FCM token to n8n webhook for push registration
-            Log.d(TAG, "TODO: register FCM token with $serverUrl")
+                .let { it.replace(Regex("/.*$"), "") }
+            // Derive n8n URL from server URL (replace first subdomain with n8n)
+            val parts = baseUrl.split(".")
+            val n8nHost = if (parts.size >= 3) "n8n." + parts.drop(1).joinToString(".") else baseUrl
+            val registerUrl = "https://$n8nHost/webhook/register-device"
+
+            val deviceId = loadDeviceId()
+            val json = """{"fcmToken":"$token","deviceId":"$deviceId","platform":"android"}"""
+            val client = OkHttpClient()
+            val request = Request.Builder()
+                .url(registerUrl)
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            val response = client.newCall(request).execute()
+            Log.d(TAG, "FCM token registered: ${response.code} ${response.body?.string()?.take(100)}")
         } catch (e: Exception) {
             Log.e(TAG, "Token registration failed: ${e.message}")
         }
+    }
+
+    private fun loadDeviceId(): String {
+        val prefs = getSharedPreferences("openclaw_device", MODE_PRIVATE)
+        return prefs.getString("device_id", "unknown") ?: "unknown"
     }
 
     companion object {
