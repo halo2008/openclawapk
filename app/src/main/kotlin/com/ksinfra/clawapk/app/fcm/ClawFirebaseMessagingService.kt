@@ -48,11 +48,28 @@ class ClawFirebaseMessagingService : FirebaseMessagingService() {
             else -> notificationPort.showMessageNotification(title, body)
         }
 
-        if (!ttsMessage.isNullOrBlank()) {
+        val textToSpeak = if (!ttsMessage.isNullOrBlank()) {
+            ttsMessage
+        } else {
+            TTS_FALLBACK[type] ?: TTS_FALLBACK["message"]
+        }
+
+        if (!textToSpeak.isNullOrBlank()) {
             scope.launch {
-                speakTts(ttsMessage)
+                speakTts(textToSpeak)
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "ClawFCM"
+
+        private val TTS_FALLBACK = mapOf(
+            "news" to "Nowe wiadomości.",
+            "work" to "Nowe zadanie.",
+            "alert" to "Nowe powiadomienie.",
+            "message" to "Nowa wiadomość."
+        )
     }
 
     private suspend fun speakTts(text: String) {
@@ -102,7 +119,4 @@ class ClawFirebaseMessagingService : FirebaseMessagingService() {
         return prefs.getString("device_id", "unknown") ?: "unknown"
     }
 
-    companion object {
-        private const val TAG = "ClawFCM"
-    }
 }

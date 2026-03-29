@@ -37,3 +37,7 @@ captures/
 # Signing config
 signing.properties
 google-services.json
+
+# Firebase credentials
+clawfire-*.json
+*firebase-adminsdk*.json

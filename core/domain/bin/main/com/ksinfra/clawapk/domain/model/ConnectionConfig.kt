@@ -6,8 +6,7 @@ data class ConnectionConfig(
     val gatewayToken: String = "",
     val cfCookie: String = "",
     val ttsLanguage: Language = Language.POLISH,
-    val piperUrl: String = "",
-    val kokoroUrl: String = ""
+    val ttsVoiceName: String = ""
 )
 
 sealed class AuthMode {

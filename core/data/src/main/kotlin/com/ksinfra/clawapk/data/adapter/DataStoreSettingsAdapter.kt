@@ -24,8 +24,7 @@ class DataStoreSettingsAdapter(
         val AUTH_TYPE = stringPreferencesKey("auth_type")
         val AUTH_VALUE = stringPreferencesKey("auth_value")
         val TTS_LANGUAGE = stringPreferencesKey("tts_language")
-        val PIPER_URL = stringPreferencesKey("piper_url")
-        val KOKORO_URL = stringPreferencesKey("kokoro_url")
+        val TTS_VOICE_NAME = stringPreferencesKey("tts_voice_name")
         val GATEWAY_TOKEN = stringPreferencesKey("gateway_token")
         val CF_COOKIE = stringPreferencesKey("cf_cookie")
     }
@@ -54,8 +53,7 @@ class DataStoreSettingsAdapter(
                 gatewayToken = prefs[Keys.GATEWAY_TOKEN] ?: "",
                 cfCookie = prefs[Keys.CF_COOKIE] ?: if (authType == "cloudflare") authValue else "",
                 ttsLanguage = language,
-                piperUrl = prefs[Keys.PIPER_URL] ?: "",
-                kokoroUrl = prefs[Keys.KOKORO_URL] ?: ""
+                ttsVoiceName = prefs[Keys.TTS_VOICE_NAME] ?: ""
             )
         }
     }
@@ -66,8 +64,7 @@ class DataStoreSettingsAdapter(
             prefs[Keys.GATEWAY_TOKEN] = config.gatewayToken
             prefs[Keys.CF_COOKIE] = config.cfCookie
             prefs[Keys.TTS_LANGUAGE] = config.ttsLanguage.name
-            prefs[Keys.PIPER_URL] = config.piperUrl
-            prefs[Keys.KOKORO_URL] = config.kokoroUrl
+            prefs[Keys.TTS_VOICE_NAME] = config.ttsVoiceName
 
             when (val mode = config.authMode) {
                 is AuthMode.Token -> {

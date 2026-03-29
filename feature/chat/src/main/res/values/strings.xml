@@ -31,6 +31,8 @@
     <string name="settings_auth_value_token">Token</string>
     <string name="settings_auth_value_password">Password</string>
     <string name="settings_tts_language">TTS language</string>
+    <string name="settings_tts_voice">TTS voice</string>
+    <string name="settings_tts_default">Default system voice</string>
     <string name="settings_tts_polish">Polish (Piper)</string>
     <string name="settings_tts_english">English (Kokoro)</string>
     <string name="settings_piper_url">Piper TTS URL (Polish)</string>

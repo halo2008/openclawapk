@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ksinfra.clawapk.chat.R
 import com.ksinfra.clawapk.chat.viewmodel.SettingsViewModel
+import com.ksinfra.clawapk.domain.model.TtsVoiceInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,11 +43,10 @@ fun SettingsScreen(
 ) {
     val serverUrl by viewModel.serverUrl.collectAsState()
     val ttsLanguage by viewModel.ttsLanguage.collectAsState()
+    val ttsVoiceName by viewModel.ttsVoiceName.collectAsState()
+    val availableVoices by viewModel.availableVoices.collectAsState()
     val gatewayToken by viewModel.gatewayToken.collectAsState()
     val cfCookie by viewModel.cfCookie.collectAsState()
-    val piperUrl by viewModel.piperUrl.collectAsState()
-    val kokoroUrl by viewModel.kokoroUrl.collectAsState()
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -103,8 +103,9 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             TtsVoiceDropdown(
-                selectedVoice = ttsLanguage,
-                onVoiceSelected = viewModel::onTtsLanguageChanged
+                selectedVoiceName = ttsVoiceName,
+                availableVoices = availableVoices,
+                onVoiceSelected = viewModel::onTtsVoiceNameChanged
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -122,24 +123,23 @@ fun SettingsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TtsVoiceDropdown(
-    selectedVoice: String,
+    selectedVoiceName: String,
+    availableVoices: List<TtsVoiceInfo>,
     onVoiceSelected: (String) -> Unit
 ) {
-    val options = listOf(
-        "ENGLISH" to "Kokoro - English (af_heart)",
-        "POLISH" to "Microsoft - Polski (Zofia)"
-    )
     var expanded by remember { mutableStateOf(false) }
+    val displayText = availableVoices.find { it.name == selectedVoiceName }?.displayName
+        ?: if (selectedVoiceName.isBlank()) stringResource(R.string.settings_tts_default) else selectedVoiceName
 
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it }
     ) {
         OutlinedTextField(
-            value = options.find { it.first == selectedVoice }?.second ?: options[0].second,
+            value = displayText,
             onValueChange = {},
             readOnly = true,
-            label = { Text(stringResource(R.string.settings_tts_language)) },
+            label = { Text(stringResource(R.string.settings_tts_voice)) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
@@ -149,11 +149,18 @@ private fun TtsVoiceDropdown(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            options.forEach { (value, label) ->
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.settings_tts_default)) },
+                onClick = {
+                    onVoiceSelected("")
+                    expanded = false
+                }
+            )
+            availableVoices.forEach { voice ->
                 DropdownMenuItem(
-                    text = { Text(label) },
+                    text = { Text(voice.displayName) },
                     onClick = {
-                        onVoiceSelected(value)
+                        onVoiceSelected(voice.name)
                         expanded = false
                     }
                 )

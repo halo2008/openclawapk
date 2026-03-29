@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.ksinfra.clawapk.domain.model.AuthMode
 import com.ksinfra.clawapk.domain.model.ConnectionConfig
 import com.ksinfra.clawapk.domain.model.Language
+import com.ksinfra.clawapk.domain.model.TtsVoiceInfo
 import com.ksinfra.clawapk.domain.port.OpenClawGateway
 import com.ksinfra.clawapk.domain.port.SettingsPort
+import com.ksinfra.clawapk.domain.port.TextToSpeechPort
 import com.ksinfra.clawapk.domain.usecase.ConnectToOpenClawUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +18,8 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val settingsPort: SettingsPort,
     private val connectToOpenClaw: ConnectToOpenClawUseCase,
-    private val gateway: OpenClawGateway
+    private val gateway: OpenClawGateway,
+    private val ttsPort: TextToSpeechPort
 ) : ViewModel() {
 
     private val _serverUrl = MutableStateFlow("")
@@ -31,17 +34,17 @@ class SettingsViewModel(
     private val _ttsLanguage = MutableStateFlow("POLISH")
     val ttsLanguage: StateFlow<String> = _ttsLanguage.asStateFlow()
 
-    private val _piperUrl = MutableStateFlow("")
-    val piperUrl: StateFlow<String> = _piperUrl.asStateFlow()
-
-    private val _kokoroUrl = MutableStateFlow("")
-    val kokoroUrl: StateFlow<String> = _kokoroUrl.asStateFlow()
-
     private val _gatewayToken = MutableStateFlow("")
     val gatewayToken: StateFlow<String> = _gatewayToken.asStateFlow()
 
     private val _cfCookie = MutableStateFlow("")
     val cfCookie: StateFlow<String> = _cfCookie.asStateFlow()
+
+    private val _ttsVoiceName = MutableStateFlow("")
+    val ttsVoiceName: StateFlow<String> = _ttsVoiceName.asStateFlow()
+
+    private val _availableVoices = MutableStateFlow<List<TtsVoiceInfo>>(emptyList())
+    val availableVoices: StateFlow<List<TtsVoiceInfo>> = _availableVoices.asStateFlow()
 
     init {
         loadSettings()
@@ -55,34 +58,30 @@ class SettingsViewModel(
     fun onAuthValueChanged(value: String) { _authValue.value = value }
     fun onCfCookieObtained(cookie: String) { _cfCookie.value = cookie }
     fun onTtsLanguageChanged(language: String) { _ttsLanguage.value = language }
-    fun onPiperUrlChanged(url: String) { _piperUrl.value = url }
-    fun onKokoroUrlChanged(url: String) { _kokoroUrl.value = url }
     fun onGatewayTokenChanged(token: String) { _gatewayToken.value = token }
+    fun onTtsVoiceNameChanged(voiceName: String) { _ttsVoiceName.value = voiceName }
 
     fun onSave() {
         viewModelScope.launch {
             val config = buildConfig()
             settingsPort.saveConnectionConfig(config)
             connectToOpenClaw(config)
-
-            val ttsProvider = when (_ttsLanguage.value) {
-                "POLISH" -> "microsoft"
-                else -> "openai"
-            }
-            gateway.setTtsProvider(ttsProvider)
+            ttsPort.setVoice(_ttsVoiceName.value)
         }
     }
 
     private fun loadSettings() {
         viewModelScope.launch {
+            _availableVoices.value = ttsPort.getAvailableVoices()
+
             settingsPort.getConnectionConfig().collect { config ->
                 if (config != null) {
                     _serverUrl.value = config.serverUrl
                     _ttsLanguage.value = config.ttsLanguage.name
-                    _piperUrl.value = config.piperUrl
-                    _kokoroUrl.value = config.kokoroUrl
+                    _ttsVoiceName.value = config.ttsVoiceName
                     _gatewayToken.value = config.gatewayToken
                     _cfCookie.value = config.cfCookie
+                    ttsPort.setVoice(config.ttsVoiceName)
                     when (val mode = config.authMode) {
                         is AuthMode.Token -> { _authType.value = "token"; _authValue.value = mode.token }
                         is AuthMode.Password -> { _authType.value = "password"; _authValue.value = mode.password }
@@ -108,8 +107,7 @@ class SettingsViewModel(
             gatewayToken = _gatewayToken.value,
             cfCookie = _cfCookie.value,
             ttsLanguage = Language.valueOf(_ttsLanguage.value),
-            piperUrl = _piperUrl.value,
-            kokoroUrl = _kokoroUrl.value
+            ttsVoiceName = _ttsVoiceName.value
         )
     }
 }
