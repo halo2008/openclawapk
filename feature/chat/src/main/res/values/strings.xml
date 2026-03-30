@@ -69,4 +69,5 @@
     <string name="settings_tts_default">Default system voice</string>
     <string name="settings_save">Save and connect</string>
     <string name="settings_fcm_register">Force FCM registration</string>
+    <string name="chat_speak_message">Read aloud</string>
 </resources>

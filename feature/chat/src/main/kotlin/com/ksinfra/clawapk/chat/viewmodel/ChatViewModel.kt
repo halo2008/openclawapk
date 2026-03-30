@@ -16,6 +16,7 @@ import com.ksinfra.clawapk.domain.model.Sender
 import com.ksinfra.clawapk.domain.port.OpenClawGateway
 import com.ksinfra.clawapk.domain.port.SettingsPort
 import com.ksinfra.clawapk.domain.port.SpeechToTextPort
+import com.ksinfra.clawapk.domain.port.TextToSpeechPort
 import com.ksinfra.clawapk.domain.usecase.ConnectToOpenClawUseCase
 import com.ksinfra.clawapk.domain.usecase.ObserveConnectionStateUseCase
 import com.ksinfra.clawapk.domain.usecase.SendMessageUseCase
@@ -42,6 +43,7 @@ class ChatViewModel(
     private val settingsPort: SettingsPort,
     private val stt: SpeechToTextPort,
     private val gateway: OpenClawGateway,
+    private val ttsPort: TextToSpeechPort,
     private val ttsLanguage: Language
 ) : ViewModel() {
 
@@ -283,18 +285,56 @@ class ChatViewModel(
         _voiceOutputEnabled.update { !it }
     }
 
+    private val _speakingMessageId = MutableStateFlow<String?>(null)
+    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
+
+    fun onToggleSpeakMessage(messageId: String, text: String) {
+        if (_speakingMessageId.value == messageId) {
+            ttsPort.stop()
+            _speakingMessageId.value = null
+        } else {
+            ttsPort.stop()
+            _speakingMessageId.value = messageId
+            viewModelScope.launch {
+                val clean = stripMarkdown(text)
+                speakResponse(clean, ttsLanguage)
+                _speakingMessageId.value = null
+            }
+        }
+    }
+
+    private fun stripMarkdown(text: String): String {
+        return text
+            .replace(Regex("#{1,6}\\s*"), "")           // headers
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")   // bold
+            .replace(Regex("\\*(.+?)\\*"), "$1")          // italic
+            .replace(Regex("__(.+?)__"), "$1")            // bold alt
+            .replace(Regex("_(.+?)_"), "$1")              // italic alt
+            .replace(Regex("~~(.+?)~~"), "$1")            // strikethrough
+            .replace(Regex("`(.+?)`"), "$1")              // inline code
+            .replace(Regex("^\\s*[-*+]\\s+", RegexOption.MULTILINE), "")  // list bullets
+            .replace(Regex("^\\s*\\d+\\.\\s+", RegexOption.MULTILINE), "") // numbered lists
+            .replace(Regex("\\[(.+?)]\\(.+?\\)"), "$1")  // links
+            .trim()
+    }
+
     private fun loadChatHistory() {
         viewModelScope.launch {
             gateway.getChatHistory().onSuccess { history ->
                 if (history.isNotEmpty() && _messages.value.isEmpty()) {
-                    val loaded = history.map { msg ->
-                        Message(
-                            id = generateId(),
-                            content = msg.content,
-                            sender = if (msg.role == "assistant") Sender.AGENT else Sender.USER,
-                            status = MessageStatus.SENT
-                        )
-                    }
+                    val loaded = history
+                        .filter { msg ->
+                            // Filter out cron system events (instructions)
+                            !(msg.role == "user" && msg.content.trimStart().startsWith("System:"))
+                        }
+                        .map { msg ->
+                            Message(
+                                id = generateId(),
+                                content = msg.content,
+                                sender = if (msg.role == "assistant") Sender.AGENT else Sender.USER,
+                                status = MessageStatus.SENT
+                            )
+                        }
                     _messages.value = loaded
                     _contextInfo.value = "${loaded.size} msgs"
                 }
@@ -326,14 +366,23 @@ class ChatViewModel(
                     }
                     is OpenClawEvent.AgentStreamEnd -> {
                         if (isMainSession(event.sessionKey)) handleStreamEnd(event)
+                        else finalizeSystemMessage(event.sessionKey)
                     }
                     is OpenClawEvent.AgentResponse -> {
                         if (isMainSession(event.sessionKey)) handleFinalResponse(event)
-                        else addSystemMessage(stripSystemTags(event.text), event.sessionKey)
+                        else {
+                            finalizeSystemMessage(event.sessionKey)
+                            addSystemMessage(stripSystemTags(event.text), event.sessionKey)
+                            finalizeSystemMessage(event.sessionKey)
+                        }
                     }
                     is OpenClawEvent.AgentError -> {
                         if (isMainSession(event.sessionKey)) handleError(event)
-                        else addSystemMessage("Error: ${event.error}", event.sessionKey)
+                        else {
+                            finalizeSystemMessage(event.sessionKey)
+                            addSystemMessage("Error: ${event.error}", event.sessionKey)
+                            finalizeSystemMessage(event.sessionKey)
+                        }
                     }
                     else -> { /* cron, session, etc handled elsewhere */ }
                 }
@@ -341,14 +390,35 @@ class ChatViewModel(
         }
     }
 
+    private val systemStreamIds = mutableMapOf<String, String>()
+
     private fun addSystemMessage(text: String, sessionKey: String?) {
         if (text.isBlank()) return
-        _systemMessages.update { it + Message(
-            id = generateId(),
-            content = text,
-            sender = Sender.AGENT,
-            channel = MessageChannel.SYSTEM
-        )}
+        val key = sessionKey ?: "unknown"
+        val existingId = systemStreamIds[key]
+
+        if (existingId != null) {
+            _systemMessages.update { messages ->
+                messages.map { msg ->
+                    if (msg.id == existingId) msg.copy(content = msg.content + text)
+                    else msg
+                }
+            }
+        } else {
+            val newId = generateId()
+            systemStreamIds[key] = newId
+            _systemMessages.update { it + Message(
+                id = newId,
+                content = text,
+                sender = Sender.AGENT,
+                channel = MessageChannel.SYSTEM
+            )}
+        }
+    }
+
+    private fun finalizeSystemMessage(sessionKey: String?) {
+        val key = sessionKey ?: "unknown"
+        systemStreamIds.remove(key)
     }
 
     private fun handleStreaming(event: OpenClawEvent.AgentStreaming) {

@@ -202,6 +202,16 @@ class OkHttpOpenClawGateway(
                     } else null
                 }?.joinToString("\n") ?: return@mapNotNull null
                 if (content.isBlank()) return@mapNotNull null
+                // Filter out cron/system event messages
+                if (role == "user" && (
+                    content.contains("NIE komentuj tych instrukcji") ||
+                    content.contains("System:") ||
+                    content.contains("Krok 1: Pobierz GET") ||
+                    content.contains("webhook/world-news")
+                )) {
+                    android.util.Log.d(TAG, "Filtered cron message: ${content.take(80)}")
+                    return@mapNotNull null
+                }
                 ChatHistoryMessage(role = role, content = content)
             }
         }

@@ -52,6 +52,14 @@ class AndroidTtsAdapter(context: Context) : TextToSpeechPort {
         selectedVoiceName = voiceName.ifBlank { null }
     }
 
+    override fun stop() {
+        if (ttsReady) tts.stop()
+    }
+
+    override fun isSpeaking(): Boolean {
+        return ttsReady && tts.isSpeaking
+    }
+
     override suspend fun synthesize(text: String, language: Language): Result<AudioData> {
         if (!ttsReady) {
             return Result.failure(IllegalStateException("Android TTS not initialized"))

@@ -8,4 +8,6 @@ interface TextToSpeechPort {
     suspend fun synthesize(text: String, language: Language): Result<AudioData>
     fun getAvailableVoices(): List<TtsVoiceInfo> = emptyList()
     fun setVoice(voiceName: String) {}
+    fun stop() {}
+    fun isSpeaking(): Boolean = false
 }

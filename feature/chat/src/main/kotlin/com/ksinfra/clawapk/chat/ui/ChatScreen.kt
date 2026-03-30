@@ -69,7 +69,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownTypography
 import com.ksinfra.clawapk.chat.R
+import androidx.compose.material.icons.filled.Stop
 import com.ksinfra.clawapk.chat.viewmodel.ChatViewModel
 import com.ksinfra.clawapk.domain.model.ConnectionState
 import com.ksinfra.clawapk.domain.model.CronJobInfo
@@ -102,6 +104,7 @@ fun ChatScreen(
     val systemMessages by viewModel.systemMessages.collectAsState()
     val configSaving by viewModel.configSaving.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
+    val speakingMessageId by viewModel.speakingMessageId.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -238,6 +241,8 @@ fun ChatScreen(
                 }
                 MessageList(
                     messages = messages,
+                    speakingMessageId = speakingMessageId,
+                    onToggleSpeak = viewModel::onToggleSpeakMessage,
                     modifier = Modifier.weight(1f)
                 )
                 // Info bar: ctx + TTFT + model
@@ -296,6 +301,8 @@ fun ChatScreen(
                 } else {
                     MessageList(
                         messages = systemMessages,
+                        speakingMessageId = null,
+                        onToggleSpeak = { _, _ -> },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -778,6 +785,8 @@ private fun AddProviderDialog(
 @Composable
 private fun MessageList(
     messages: List<Message>,
+    speakingMessageId: String?,
+    onToggleSpeak: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -796,13 +805,17 @@ private fun MessageList(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         items(messages, key = { it.id }) { message ->
-            MessageBubble(message)
+            MessageBubble(
+                message = message,
+                isSpeaking = speakingMessageId == message.id,
+                onToggleSpeak = { onToggleSpeak(message.id, message.content) }
+            )
         }
     }
 }
 
 @Composable
-private fun MessageBubble(message: Message) {
+private fun MessageBubble(message: Message, isSpeaking: Boolean = false, onToggleSpeak: (() -> Unit)? = null) {
     val isUser = message.sender == Sender.USER
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
     val bgColor = if (isUser) {
@@ -815,6 +828,15 @@ private fun MessageBubble(message: Message) {
         topEnd = 12.dp,
         bottomStart = if (isUser) 12.dp else 4.dp,
         bottomEnd = if (isUser) 4.dp else 12.dp
+    )
+
+    val smallerTypography = markdownTypography(
+        h1 = MaterialTheme.typography.titleMedium,
+        h2 = MaterialTheme.typography.titleSmall,
+        h3 = MaterialTheme.typography.labelLarge,
+        h4 = MaterialTheme.typography.labelMedium,
+        h5 = MaterialTheme.typography.labelSmall,
+        h6 = MaterialTheme.typography.labelSmall,
     )
 
     Box(
@@ -836,17 +858,41 @@ private fun MessageBubble(message: Message) {
                         text = message.content,
                         style = MaterialTheme.typography.bodyLarge
                     )
-                } else {
-                    Markdown(
-                        content = message.content,
+                } else if (message.status == MessageStatus.SENDING) {
+                    // Plain text during streaming to avoid re-render flicker
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                }
-                if (message.status == MessageStatus.SENDING && message.sender == Sender.AGENT) {
                     Text(
                         text = "...",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                } else {
+                    Markdown(
+                        content = message.content,
+                        typography = smallerTypography,
+                    )
+                }
+                if (!isUser && message.status != MessageStatus.SENDING && onToggleSpeak != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        IconButton(
+                            onClick = onToggleSpeak,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                if (isSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                                contentDescription = stringResource(R.string.chat_speak_message),
+                                modifier = Modifier.size(16.dp),
+                                tint = if (isSpeaking) MaterialTheme.colorScheme.error
+                                       else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }

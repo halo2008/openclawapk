@@ -39,6 +39,7 @@ val chatModule = module {
             settingsPort = get(),
             stt = get(),
             gateway = get(),
+            ttsPort = get(),
             ttsLanguage = Language.POLISH
         )
     }

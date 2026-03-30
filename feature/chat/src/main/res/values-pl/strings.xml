@@ -69,4 +69,5 @@
     <string name="settings_tts_default">Domyslny glos systemowy</string>
     <string name="settings_save">Zapisz i polacz</string>
     <string name="settings_fcm_register">Wymus rejestracje FCM</string>
+    <string name="chat_speak_message">Odczytaj</string>
 </resources>
