@@ -18,6 +18,7 @@ import com.ksinfra.clawapk.websocket.model.AuthParams
 import com.ksinfra.clawapk.websocket.model.ClientInfo
 import com.ksinfra.clawapk.websocket.model.ConnectParams
 import com.ksinfra.clawapk.websocket.model.EventFrame
+import com.ksinfra.clawapk.websocket.model.FrameError
 import com.ksinfra.clawapk.websocket.model.RequestFrame
 import com.ksinfra.clawapk.websocket.model.ResponseFrame
 import kotlinx.coroutines.CompletableDeferred
@@ -123,20 +124,55 @@ class OkHttpOpenClawGateway(
     }
 
     private suspend fun patchConfig(raw: JsonObject): Result<String> {
-        // Fetch latest hash if we don't have one
-        if (configBaseHash == null) {
+        val maxRetries = 3
+        var lastError: Throwable? = null
+
+        repeat(maxRetries) { attempt ->
+            // Always fetch fresh hash before each attempt
             fetchConfig()
+
+            val params = buildJsonObject {
+                put("raw", raw.toString())
+                configBaseHash?.let { put("baseHash", it) }
+            }
+
+            val response = sendRequestRaw("config.patch", params)
+            if (response.ok) {
+                fetchConfig()
+                return Result.success(response.payload?.toString() ?: "")
+            }
+
+            val error = response.error
+            val msg = error?.message ?: "Unknown error"
+            lastError = RuntimeException(msg)
+
+            // Rate limit — wait the requested time and retry
+            val retryMs = error?.retryAfterMs
+            if (retryMs != null && retryMs > 0) {
+                android.util.Log.w(TAG, "config.patch rate-limited, waiting ${retryMs}ms (attempt ${attempt + 1}/$maxRetries)")
+                delay(retryMs + 500)
+                return@repeat
+            }
+
+            // EBUSY / transient — short backoff and retry
+            if (msg.contains("EBUSY") || msg.contains("resource busy") || error?.retryable == true) {
+                val backoff = (attempt + 1) * 2000L
+                android.util.Log.w(TAG, "config.patch EBUSY/retryable, waiting ${backoff}ms (attempt ${attempt + 1}/$maxRetries)")
+                delay(backoff)
+                return@repeat
+            }
+
+            // Hash mismatch — re-fetch and retry immediately
+            if (msg.contains("config changed since last load") || msg.contains("base hash")) {
+                android.util.Log.w(TAG, "config.patch hash mismatch, re-fetching (attempt ${attempt + 1}/$maxRetries)")
+                return@repeat
+            }
+
+            // Non-retryable error — fail immediately
+            return Result.failure(lastError!!)
         }
-        val params = buildJsonObject {
-            put("raw", raw.toString())
-            configBaseHash?.let { put("baseHash", it) }
-        }
-        val result = sendRequest("config.patch", params)
-        // Refresh hash after successful patch
-        if (result.isSuccess) {
-            fetchConfig()
-        }
-        return result
+
+        return Result.failure(lastError ?: RuntimeException("config.patch failed after $maxRetries attempts"))
     }
 
     override suspend fun setTtsProvider(provider: String): Result<String> {
@@ -329,8 +365,8 @@ class OkHttpOpenClawGateway(
         }
     }
 
-    private suspend fun sendRequest(method: String, params: JsonObject?): Result<String> {
-        val ws = webSocket ?: return Result.failure(IllegalStateException("Not connected"))
+    private suspend fun sendRequestRaw(method: String, params: JsonObject?): ResponseFrame {
+        val ws = webSocket ?: return ResponseFrame(id = "", ok = false, error = FrameError(code = "DISCONNECTED", message = "Not connected"))
         val id = generateId()
         val frame = RequestFrame(id = id, method = method, params = params)
         val deferred = CompletableDeferred<ResponseFrame>()
@@ -339,15 +375,19 @@ class OkHttpOpenClawGateway(
         ws.send(json.encodeToString(RequestFrame.serializer(), frame))
 
         return try {
-            val response = deferred.await()
-            if (response.ok) {
-                Result.success(response.payload?.toString() ?: "")
-            } else {
-                Result.failure(RuntimeException(response.error?.message ?: "Unknown error"))
-            }
+            deferred.await()
         } catch (e: Exception) {
             pendingRequests.remove(id)
-            Result.failure(e)
+            ResponseFrame(id = id, ok = false, error = FrameError(code = "EXCEPTION", message = e.message ?: "Unknown error"))
+        }
+    }
+
+    private suspend fun sendRequest(method: String, params: JsonObject?): Result<String> {
+        val response = sendRequestRaw(method, params)
+        return if (response.ok) {
+            Result.success(response.payload?.toString() ?: "")
+        } else {
+            Result.failure(RuntimeException(response.error?.message ?: "Unknown error"))
         }
     }
 
@@ -577,19 +617,20 @@ class OkHttpOpenClawGateway(
                 val payload = frame.payload?.jsonObject
                 val stream = payload?.get("stream")?.jsonPrimitive?.content
                 val runId = payload?.get("runId")?.jsonPrimitive?.content ?: ""
+                val sessionKey = payload?.get("sessionKey")?.jsonPrimitive?.content
                 when (stream) {
                     "assistant" -> {
                         val text = payload?.get("data")?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-                        if (text.isNotBlank()) OpenClawEvent.AgentStreaming(runId, text) else null
+                        if (text.isNotBlank()) OpenClawEvent.AgentStreaming(runId, text, sessionKey) else null
                     }
                     "lifecycle" -> {
                         val data = payload?.get("data")?.jsonObject
                         val phase = data?.get("phase")?.jsonPrimitive?.content
                         when (phase) {
-                            "end" -> OpenClawEvent.AgentStreamEnd(runId)
+                            "end" -> OpenClawEvent.AgentStreamEnd(runId, sessionKey)
                             "error" -> {
                                 val error = data?.get("error")?.jsonPrimitive?.content ?: "Unknown error"
-                                OpenClawEvent.AgentError(runId, error)
+                                OpenClawEvent.AgentError(runId, error, sessionKey)
                             }
                             else -> null
                         }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ksinfra.clawapk.domain.model.ConnectionState
 import com.ksinfra.clawapk.domain.model.Language
 import com.ksinfra.clawapk.domain.model.Message
+import com.ksinfra.clawapk.domain.model.MessageChannel
 import com.ksinfra.clawapk.domain.model.MessageStatus
 import com.ksinfra.clawapk.domain.model.CronJobInfo
 import com.ksinfra.clawapk.domain.model.ModelConfig
@@ -22,8 +23,11 @@ import com.ksinfra.clawapk.domain.usecase.SpeakResponseUseCase
 import com.ksinfra.clawapk.domain.usecase.StartVoiceInputUseCase
 import com.ksinfra.clawapk.domain.usecase.StopVoiceInputUseCase
 import com.ksinfra.clawapk.common.generateId
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -43,6 +47,9 @@ class ChatViewModel(
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
+
+    private val _systemMessages = MutableStateFlow<List<Message>>(emptyList())
+    val systemMessages: StateFlow<List<Message>> = _systemMessages.asStateFlow()
 
     val connectionState: StateFlow<ConnectionState> = observeConnectionState()
     val recognitionState: StateFlow<RecognitionState> = stt.recognitionState
@@ -79,6 +86,12 @@ class ChatViewModel(
 
     private val _contextInfo = MutableStateFlow("")
     val contextInfo: StateFlow<String> = _contextInfo.asStateFlow()
+
+    private val _configSaving = MutableStateFlow(false)
+    val configSaving: StateFlow<Boolean> = _configSaving.asStateFlow()
+
+    private val _uiMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val uiMessage: SharedFlow<String> = _uiMessage.asSharedFlow()
 
     private var streamStartTime: Long = 0
 
@@ -199,39 +212,44 @@ class ChatViewModel(
         }
     }
 
+    private suspend fun saveModelConfig(newConfig: ModelConfig): Boolean {
+        _configSaving.value = true
+        return try {
+            gateway.setModelConfig(newConfig)
+                .onSuccess {
+                    _modelConfig.value = newConfig
+                    if (newConfig.primary.isNotBlank()) _currentModel.value = newConfig.primary
+                }
+                .onFailure { e ->
+                    _uiMessage.tryEmit("Nie udało się zapisać: ${e.message}")
+                }
+                .isSuccess
+        } finally {
+            _configSaving.value = false
+        }
+    }
+
     fun onSetPrimaryModel(modelKey: String) {
         viewModelScope.launch {
             val current = _modelConfig.value
-            // Move old primary to fallbacks if it was set, remove new primary from fallbacks
             val newFallbacks = buildList {
                 if (current.primary.isNotBlank() && current.primary != modelKey) add(current.primary)
                 addAll(current.fallbacks.filter { it != modelKey && it != current.primary })
             }
-            val newConfig = ModelConfig(primary = modelKey, fallbacks = newFallbacks)
-            gateway.setModelConfig(newConfig).onSuccess {
-                _modelConfig.value = newConfig
-                _currentModel.value = modelKey
-            }
+            saveModelConfig(ModelConfig(primary = modelKey, fallbacks = newFallbacks))
         }
     }
 
     fun onReorderModels(primary: String, fallbacks: List<String>) {
         viewModelScope.launch {
-            val newConfig = ModelConfig(primary = primary, fallbacks = fallbacks)
-            gateway.setModelConfig(newConfig).onSuccess {
-                _modelConfig.value = newConfig
-                _currentModel.value = primary
-            }
+            saveModelConfig(ModelConfig(primary = primary, fallbacks = fallbacks))
         }
     }
 
     fun onRemoveFallback(modelKey: String) {
         viewModelScope.launch {
             val current = _modelConfig.value
-            val newConfig = current.copy(fallbacks = current.fallbacks.filter { it != modelKey })
-            gateway.setModelConfig(newConfig).onSuccess {
-                _modelConfig.value = newConfig
-            }
+            saveModelConfig(current.copy(fallbacks = current.fallbacks.filter { it != modelKey }))
         }
     }
 
@@ -239,10 +257,7 @@ class ChatViewModel(
         viewModelScope.launch {
             val current = _modelConfig.value
             if (modelKey != current.primary && modelKey !in current.fallbacks) {
-                val newConfig = current.copy(fallbacks = current.fallbacks + modelKey)
-                gateway.setModelConfig(newConfig).onSuccess {
-                    _modelConfig.value = newConfig
-                }
+                saveModelConfig(current.copy(fallbacks = current.fallbacks + modelKey))
             }
         }
     }
@@ -305,19 +320,43 @@ class ChatViewModel(
         viewModelScope.launch {
             gateway.events.collect { event ->
                 when (event) {
-                    is OpenClawEvent.AgentStreaming -> handleStreaming(event)
-                    is OpenClawEvent.AgentStreamEnd -> handleStreamEnd(event)
-                    is OpenClawEvent.AgentResponse -> handleFinalResponse(event)
-                    is OpenClawEvent.AgentError -> handleError(event)
+                    is OpenClawEvent.AgentStreaming -> {
+                        if (isMainSession(event.sessionKey)) handleStreaming(event)
+                        else addSystemMessage(stripSystemTags(event.textDelta), event.sessionKey)
+                    }
+                    is OpenClawEvent.AgentStreamEnd -> {
+                        if (isMainSession(event.sessionKey)) handleStreamEnd(event)
+                    }
+                    is OpenClawEvent.AgentResponse -> {
+                        if (isMainSession(event.sessionKey)) handleFinalResponse(event)
+                        else addSystemMessage(stripSystemTags(event.text), event.sessionKey)
+                    }
+                    is OpenClawEvent.AgentError -> {
+                        if (isMainSession(event.sessionKey)) handleError(event)
+                        else addSystemMessage("Error: ${event.error}", event.sessionKey)
+                    }
                     else -> { /* cron, session, etc handled elsewhere */ }
                 }
             }
         }
     }
 
+    private fun addSystemMessage(text: String, sessionKey: String?) {
+        if (text.isBlank()) return
+        _systemMessages.update { it + Message(
+            id = generateId(),
+            content = text,
+            sender = Sender.AGENT,
+            channel = MessageChannel.SYSTEM
+        )}
+    }
+
     private fun handleStreaming(event: OpenClawEvent.AgentStreaming) {
         _isThinking.value = false
         _isStreaming.value = true
+
+        val cleanText = stripSystemTags(event.textDelta)
+        if (cleanText.isBlank()) return
 
         // Measure TTFT
         if (lastStreamRunId != event.runId && streamStartTime > 0) {
@@ -331,7 +370,7 @@ class ChatViewModel(
             streamingMessageId = msgId
             _messages.update { it + Message(
                 id = msgId,
-                content = event.textDelta,
+                content = cleanText,
                 sender = Sender.AGENT,
                 status = MessageStatus.SENDING
             )}
@@ -340,7 +379,7 @@ class ChatViewModel(
             val msgId = streamingMessageId ?: return
             _messages.update { msgs ->
                 msgs.map { msg ->
-                    if (msg.id == msgId) msg.copy(content = event.textDelta)
+                    if (msg.id == msgId) msg.copy(content = cleanText)
                     else msg
                 }
             }
@@ -362,22 +401,25 @@ class ChatViewModel(
 
     private fun handleFinalResponse(event: OpenClawEvent.AgentResponse) {
         _isStreaming.value = false
+        val cleanText = stripSystemTags(event.text)
         val msgId = streamingMessageId
         if (msgId != null) {
             // Replace streaming message with final text
-            _messages.update { msgs ->
-                msgs.map { msg ->
-                    if (msg.id == msgId) msg.copy(content = event.text, status = MessageStatus.SENT)
-                    else msg
+            if (cleanText.isNotBlank()) {
+                _messages.update { msgs ->
+                    msgs.map { msg ->
+                        if (msg.id == msgId) msg.copy(content = cleanText, status = MessageStatus.SENT)
+                        else msg
+                    }
                 }
             }
             streamingMessageId = null
             lastStreamRunId = null
-        } else {
+        } else if (cleanText.isNotBlank()) {
             // No streaming was happening, add as new message
             _messages.update { it + Message(
                 id = generateId(),
-                content = event.text,
+                content = cleanText,
                 sender = Sender.AGENT
             )}
         }
@@ -415,6 +457,24 @@ class ChatViewModel(
                     onSendMessage(state.text)
                 }
             }
+        }
+    }
+
+    companion object {
+        private const val MAIN_SESSION_KEY = "agent:main:main"
+
+        private val SYSTEM_TAG_REGEX = Regex("<system-reminder>[\\s\\S]*?</system-reminder>")
+        private val XML_TAG_REGEX = Regex("<(?:user-prompt-submit-hook|tool-result|command-name)[^>]*>[\\s\\S]*?</(?:user-prompt-submit-hook|tool-result|command-name)>")
+
+        fun isMainSession(sessionKey: String?): Boolean {
+            return sessionKey == null || sessionKey == MAIN_SESSION_KEY || sessionKey.isEmpty()
+        }
+
+        fun stripSystemTags(text: String): String {
+            return text
+                .replace(SYSTEM_TAG_REGEX, "")
+                .replace(XML_TAG_REGEX, "")
+                .trim()
         }
     }
 }

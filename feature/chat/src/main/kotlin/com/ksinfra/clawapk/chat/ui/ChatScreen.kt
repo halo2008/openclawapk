@@ -44,7 +44,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Badge
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -94,6 +99,17 @@ fun ChatScreen(
     val ttft by viewModel.ttft.collectAsState()
     val contextInfo by viewModel.contextInfo.collectAsState()
     val isThinking by viewModel.isThinking.collectAsState()
+    val systemMessages by viewModel.systemMessages.collectAsState()
+    val configSaving by viewModel.configSaving.collectAsState()
+    var selectedTab by remember { mutableStateOf(0) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        viewModel.uiMessage.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     var showMenu by remember { mutableStateOf(false) }
     var showModelMenu by remember { mutableStateOf(false) }
@@ -101,6 +117,7 @@ fun ChatScreen(
     var showAddProviderDialog by remember { mutableStateOf(false) }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -173,72 +190,116 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding()
         ) {
-            if (isThinking) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Thinking...",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else if (isStreaming) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            // Tab bar: Chat / System
+            TabRow(selectedTabIndex = selectedTab) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Chat") }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("System")
+                            if (systemMessages.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Badge { Text("${systemMessages.size}") }
+                            }
+                        }
+                    }
+                )
             }
-            MessageList(
-                messages = messages,
-                modifier = Modifier.weight(1f)
-            )
-            // Info bar: ctx + TTFT + model
-            if (contextInfo.isNotBlank() || ttft != null || currentModel.isNotBlank()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (contextInfo.isNotBlank()) {
+
+            if (selectedTab == 0) {
+                // Chat tab
+                if (isThinking) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "CTX: $contextInfo",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Thinking...",
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (ttft != null) {
+                } else if (isStreaming) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                MessageList(
+                    messages = messages,
+                    modifier = Modifier.weight(1f)
+                )
+                // Info bar: ctx + TTFT + model
+                if (contextInfo.isNotBlank() || ttft != null || currentModel.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (contextInfo.isNotBlank()) {
+                            Text(
+                                text = "CTX: $contextInfo",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (ttft != null) {
+                            Text(
+                                text = "TTFT: ${ttft}ms",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (currentModel.isNotBlank()) {
+                            Text(
+                                text = currentModel.substringAfterLast("/"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                ChatInput(
+                    recognitionState = recognitionState,
+                    onSendMessage = viewModel::onSendMessage,
+                    onToggleVoice = viewModel::onToggleVoiceInput
+                )
+            } else {
+                // System tab
+                if (systemMessages.isEmpty()) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = "TTFT: ${ttft}ms",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Brak wiadomości systemowych",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (currentModel.isNotBlank()) {
-                        Text(
-                            text = currentModel.substringAfterLast("/"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                } else {
+                    MessageList(
+                        messages = systemMessages,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
-            ChatInput(
-                recognitionState = recognitionState,
-                onSendMessage = viewModel::onSendMessage,
-                onToggleVoice = viewModel::onToggleVoiceInput
-            )
         }
     }
 
@@ -246,6 +307,7 @@ fun ChatScreen(
         ModelConfigDialog(
             modelConfig = modelConfig,
             availableModels = availableModels,
+            isSaving = configSaving,
             onSetPrimary = viewModel::onSetPrimaryModel,
             onReorder = viewModel::onReorderModels,
             onAddFallback = viewModel::onAddFallback,
@@ -373,6 +435,7 @@ private fun ConnectionIndicator(state: ConnectionState) {
 private fun ModelConfigDialog(
     modelConfig: ModelConfig,
     availableModels: List<ModelInfo>,
+    isSaving: Boolean = false,
     onSetPrimary: (String) -> Unit,
     onReorder: (String, List<String>) -> Unit,
     onAddFallback: (String) -> Unit,
@@ -417,6 +480,13 @@ private fun ModelConfigDialog(
         title = { Text(stringResource(R.string.model_config_title)) },
         text = {
             LazyColumn {
+                if (isSaving) {
+                    item(key = "saving_indicator") {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        )
+                    }
+                }
                 // Primary model
                 item(key = "primary_header") {
                     Text(
