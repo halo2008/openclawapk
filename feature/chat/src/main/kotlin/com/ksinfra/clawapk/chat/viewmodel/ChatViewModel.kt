@@ -95,11 +95,17 @@ class ChatViewModel(
     private val _uiMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val uiMessage: SharedFlow<String> = _uiMessage.asSharedFlow()
 
+    private val _speakingMessageId = MutableStateFlow<String?>(null)
+    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
+
     private var streamStartTime: Long = 0
 
     // Track streaming message being built
     private var streamingMessageId: String? = null
     private var lastStreamRunId: String? = null
+
+    // Track system message streaming per sessionKey
+    private val systemStreamingIds = mutableMapOf<String, String>()
 
     // TTS only when user initiated the conversation (not cron/system events)
     private var userSentLastMessage = false
@@ -274,6 +280,19 @@ class ChatViewModel(
         }
     }
 
+    fun onToggleSpeakMessage(messageId: String, text: String) {
+        viewModelScope.launch {
+            if (_speakingMessageId.value == messageId) {
+                ttsPort.stop()
+                _speakingMessageId.value = null
+            } else {
+                _speakingMessageId.value = messageId
+                speakResponse(text, ttsLanguage)
+                _speakingMessageId.value = null
+            }
+        }
+    }
+
     fun onToggleVoiceInput() {
         when (stt.recognitionState.value) {
             is RecognitionState.Listening -> stopVoiceInput()
@@ -285,56 +304,20 @@ class ChatViewModel(
         _voiceOutputEnabled.update { !it }
     }
 
-    private val _speakingMessageId = MutableStateFlow<String?>(null)
-    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
-
-    fun onToggleSpeakMessage(messageId: String, text: String) {
-        if (_speakingMessageId.value == messageId) {
-            ttsPort.stop()
-            _speakingMessageId.value = null
-        } else {
-            ttsPort.stop()
-            _speakingMessageId.value = messageId
-            viewModelScope.launch {
-                val clean = stripMarkdown(text)
-                speakResponse(clean, ttsLanguage)
-                _speakingMessageId.value = null
-            }
-        }
-    }
-
-    private fun stripMarkdown(text: String): String {
-        return text
-            .replace(Regex("#{1,6}\\s*"), "")           // headers
-            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")   // bold
-            .replace(Regex("\\*(.+?)\\*"), "$1")          // italic
-            .replace(Regex("__(.+?)__"), "$1")            // bold alt
-            .replace(Regex("_(.+?)_"), "$1")              // italic alt
-            .replace(Regex("~~(.+?)~~"), "$1")            // strikethrough
-            .replace(Regex("`(.+?)`"), "$1")              // inline code
-            .replace(Regex("^\\s*[-*+]\\s+", RegexOption.MULTILINE), "")  // list bullets
-            .replace(Regex("^\\s*\\d+\\.\\s+", RegexOption.MULTILINE), "") // numbered lists
-            .replace(Regex("\\[(.+?)]\\(.+?\\)"), "$1")  // links
-            .trim()
-    }
-
     private fun loadChatHistory() {
         viewModelScope.launch {
             gateway.getChatHistory().onSuccess { history ->
                 if (history.isNotEmpty() && _messages.value.isEmpty()) {
-                    val loaded = history
-                        .filter { msg ->
-                            // Filter out cron system events (instructions)
-                            !(msg.role == "user" && msg.content.trimStart().startsWith("System:"))
-                        }
-                        .map { msg ->
-                            Message(
-                                id = generateId(),
-                                content = msg.content,
-                                sender = if (msg.role == "assistant") Sender.AGENT else Sender.USER,
-                                status = MessageStatus.SENT
-                            )
-                        }
+                    val loaded = history.mapNotNull { msg ->
+                        val clean = stripSystemTags(msg.content)
+                        if (clean.isBlank()) return@mapNotNull null
+                        Message(
+                            id = generateId(),
+                            content = clean,
+                            sender = if (msg.role == "assistant") Sender.AGENT else Sender.USER,
+                            status = MessageStatus.SENT
+                        )
+                    }
                     _messages.value = loaded
                     _contextInfo.value = "${loaded.size} msgs"
                 }
@@ -362,63 +345,86 @@ class ChatViewModel(
                 when (event) {
                     is OpenClawEvent.AgentStreaming -> {
                         if (isMainSession(event.sessionKey)) handleStreaming(event)
-                        else addSystemMessage(stripSystemTags(event.textDelta), event.sessionKey)
+                        else appendSystemStreaming(stripSystemTags(event.textDelta), event.sessionKey ?: event.runId)
                     }
                     is OpenClawEvent.AgentStreamEnd -> {
                         if (isMainSession(event.sessionKey)) handleStreamEnd(event)
-                        else finalizeSystemMessage(event.sessionKey)
+                        else finalizeSystemStreaming(event.sessionKey ?: event.runId)
                     }
                     is OpenClawEvent.AgentResponse -> {
                         if (isMainSession(event.sessionKey)) handleFinalResponse(event)
                         else {
-                            finalizeSystemMessage(event.sessionKey)
-                            addSystemMessage(stripSystemTags(event.text), event.sessionKey)
-                            finalizeSystemMessage(event.sessionKey)
+                            val key = event.sessionKey ?: ""
+                            val existingId = systemStreamingIds.remove(key)
+                            if (existingId != null) {
+                                // Replace streaming message with final
+                                val clean = stripSystemTags(event.text)
+                                if (clean.isNotBlank()) {
+                                    _systemMessages.update { msgs ->
+                                        msgs.map { if (it.id == existingId) it.copy(content = clean, status = MessageStatus.SENT) else it }
+                                    }
+                                }
+                            } else {
+                                addSystemMessage(stripSystemTags(event.text), key)
+                            }
                         }
                     }
                     is OpenClawEvent.AgentError -> {
                         if (isMainSession(event.sessionKey)) handleError(event)
-                        else {
-                            finalizeSystemMessage(event.sessionKey)
-                            addSystemMessage("Error: ${event.error}", event.sessionKey)
-                            finalizeSystemMessage(event.sessionKey)
-                        }
+                        else addSystemMessage("Error: ${event.error}", event.sessionKey)
                     }
-                    else -> { /* cron, session, etc handled elsewhere */ }
+                    is OpenClawEvent.CronFired -> {
+                        val cron = event.event
+                        val text = buildString {
+                            append("[${cron.jobName}]")
+                            cron.message?.let { append("\n$it") }
+                        }
+                        addSystemMessage(text, "cron:${cron.jobId}")
+                    }
+                    else -> { /* session changes, tick, etc */ }
                 }
             }
         }
     }
 
-    private val systemStreamIds = mutableMapOf<String, String>()
-
     private fun addSystemMessage(text: String, sessionKey: String?) {
         if (text.isBlank()) return
-        val key = sessionKey ?: "unknown"
-        val existingId = systemStreamIds[key]
+        _systemMessages.update { it + Message(
+            id = generateId(),
+            content = text,
+            sender = Sender.AGENT,
+            channel = MessageChannel.SYSTEM
+        )}
+    }
 
+    private fun appendSystemStreaming(textDelta: String, key: String) {
+        if (textDelta.isBlank()) return
+        val existingId = systemStreamingIds[key]
         if (existingId != null) {
-            _systemMessages.update { messages ->
-                messages.map { msg ->
-                    if (msg.id == existingId) msg.copy(content = msg.content + text)
+            _systemMessages.update { msgs ->
+                msgs.map { msg ->
+                    if (msg.id == existingId) msg.copy(content = msg.content + textDelta)
                     else msg
                 }
             }
         } else {
-            val newId = generateId()
-            systemStreamIds[key] = newId
+            val msgId = generateId()
+            systemStreamingIds[key] = msgId
             _systemMessages.update { it + Message(
-                id = newId,
-                content = text,
+                id = msgId,
+                content = textDelta,
                 sender = Sender.AGENT,
-                channel = MessageChannel.SYSTEM
+                channel = MessageChannel.SYSTEM,
+                status = MessageStatus.SENDING
             )}
         }
     }
 
-    private fun finalizeSystemMessage(sessionKey: String?) {
-        val key = sessionKey ?: "unknown"
-        systemStreamIds.remove(key)
+    private fun finalizeSystemStreaming(key: String) {
+        val msgId = systemStreamingIds.remove(key) ?: return
+        _systemMessages.update { msgs ->
+            msgs.map { if (it.id == msgId) it.copy(status = MessageStatus.SENT) else it }
+        }
     }
 
     private fun handleStreaming(event: OpenClawEvent.AgentStreaming) {
@@ -531,13 +537,14 @@ class ChatViewModel(
     }
 
     companion object {
-        private const val MAIN_SESSION_KEY = "agent:main:main"
-
         private val SYSTEM_TAG_REGEX = Regex("<system-reminder>[\\s\\S]*?</system-reminder>")
         private val XML_TAG_REGEX = Regex("<(?:user-prompt-submit-hook|tool-result|command-name)[^>]*>[\\s\\S]*?</(?:user-prompt-submit-hook|tool-result|command-name)>")
 
+        /** Main session key is exactly "agent:main:main" — cron/isolated sessions have keys like "agent:main:cron:xxx" */
         fun isMainSession(sessionKey: String?): Boolean {
-            return sessionKey == null || sessionKey == MAIN_SESSION_KEY || sessionKey.isEmpty()
+            if (sessionKey.isNullOrBlank()) return true
+            if (sessionKey.contains("cron:")) return false
+            return sessionKey == "agent:main:main"
         }
 
         fun stripSystemTags(text: String): String {

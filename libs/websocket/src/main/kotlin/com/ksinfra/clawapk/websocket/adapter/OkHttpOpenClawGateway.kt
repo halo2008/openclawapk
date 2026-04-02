@@ -187,7 +187,6 @@ class OkHttpOpenClawGateway(
         return sendRequest("chat.history", buildJsonObject {
             put("sessionKey", "agent:main:main")
         }).mapCatching { responseJson ->
-            android.util.Log.d(TAG, "chat.history response: ${responseJson.take(500)}")
             val element = json.parseToJsonElement(responseJson)
             val messages = element.jsonObject["messages"]?.jsonArray
                 ?: element.jsonArray
@@ -195,6 +194,8 @@ class OkHttpOpenClawGateway(
             messages.mapNotNull { msg ->
                 val obj = msg.jsonObject
                 val role = obj["role"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                // Only show user and assistant messages
+                if (role != "user" && role != "assistant") return@mapNotNull null
                 val content = obj["content"]?.jsonArray?.mapNotNull { block ->
                     val blockObj = block.jsonObject
                     if (blockObj["type"]?.jsonPrimitive?.content == "text") {
@@ -202,16 +203,8 @@ class OkHttpOpenClawGateway(
                     } else null
                 }?.joinToString("\n") ?: return@mapNotNull null
                 if (content.isBlank()) return@mapNotNull null
-                // Filter out cron/system event messages
-                if (role == "user" && (
-                    content.contains("NIE komentuj tych instrukcji") ||
-                    content.contains("System:") ||
-                    content.contains("Krok 1: Pobierz GET") ||
-                    content.contains("webhook/world-news")
-                )) {
-                    android.util.Log.d(TAG, "Filtered cron message: ${content.take(80)}")
-                    return@mapNotNull null
-                }
+                // Filter out system/cron injected messages
+                if (isSystemMessage(content)) return@mapNotNull null
                 ChatHistoryMessage(role = role, content = content)
             }
         }
@@ -561,6 +554,9 @@ class OkHttpOpenClawGateway(
                     authParams.token?.let { put("token", it) }
                     authParams.password?.let { put("password", it) }
                     authParams.deviceToken?.let { put("deviceToken", it) }
+                    // Send gateway token as bootstrapToken for auto-pairing new devices
+                    val bootstrap = config.gatewayToken.ifBlank { null }
+                    bootstrap?.let { put("bootstrapToken", it) }
                 })
             }
         }
@@ -603,6 +599,10 @@ class OkHttpOpenClawGateway(
     }
 
     private fun handleEvent(frame: EventFrame) {
+        if (frame.event == "agent" || frame.event == "chat") {
+            val p = frame.payload?.jsonObject
+            android.util.Log.w(TAG, "EVENT ${frame.event} sessionKey=${p?.get("sessionKey")} stream=${p?.get("stream")} state=${p?.get("state")} keys=${p?.keys}")
+        }
         val openClawEvent = when (frame.event) {
             "chat" -> {
                 val payload = frame.payload?.jsonObject
@@ -724,5 +724,32 @@ class OkHttpOpenClawGateway(
     companion object {
         private const val TAG = "ClawWS"
         private const val RECONNECT_DELAY_MS = 5000L
+
+        private val SYSTEM_PREFIXES = listOf(
+            "Read HEARTBEAT.md",
+            "Read heartbeat.md",
+            "[System]",
+            "[system]",
+            "⚠️ API rate limit",
+            "FailoverError:",
+            "Error:",
+        )
+
+        private val SYSTEM_CONTAINS = listOf(
+            "workspace context). Follow it strictly",
+            "model fallback decision",
+            "lane task error",
+            "embedded run agent end",
+            "API rate limit reached",
+            "RESOURCE_EXHAUSTED",
+            "model switch detected",
+        )
+
+        fun isSystemMessage(text: String): Boolean {
+            val trimmed = text.trim()
+            return SYSTEM_PREFIXES.any { trimmed.startsWith(it) } ||
+                trimmed.startsWith("<system-reminder>") ||
+                SYSTEM_CONTAINS.any { trimmed.contains(it) }
+        }
     }
 }
